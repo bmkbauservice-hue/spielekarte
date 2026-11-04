@@ -6,21 +6,38 @@ Nur zum Spaß – kein Geld, kein Einsatz.
 Jede Karte hat eine feste URL, z. B. `https://mkdirdesign.com/spiel/k/MUJU01`.
 Die Karten-ID (`MUJU01`) ist der Raum: 3 Plätze am Tisch, beliebig viele Zuschauer (max. 20).
 
-**Stand:** Etappe 2 – Skat-Grundspiel (noch ohne Reizen). Reizen und Punkteliste folgen in Etappe 3.
+**Stand:** Etappe 3 – echtes Skat mit Reizen, Skat/Hand, allen Spielarten, Spielwert, Punkteliste und Abendwertung.
+Hausregeln (Kontra/Re, Bock, Schenken) folgen in Etappe 3b, Speichern in Etappe 3c, Design in Etappe 4.
 
-## Spielablauf (Etappe 2)
+## Spielablauf
 
-1. Drei Spieler sitzen am Tisch, einer drückt „Spiel starten“.
+1. Drei Spieler sitzen am Tisch, einer drückt „Spiel starten“. Damit beginnt der **Abend**.
 2. Gemischt wird mit kryptografischem Zufall: 10 Karten je Spieler, 2 in den Skat.
-3. **Vorhand** (links vom Geber) ist Alleinspieler und wählt Kreuz, Pik, Herz, Karo oder Grand.
-   Reizen gibt es noch nicht. Weil der Geber jede Runde weiterrückt, wechselt der Alleinspieler reihum.
-4. 10 Stiche mit Bedienpflicht. Buben sind immer Trumpf (Kreuz > Pik > Herz > Karo), im Farbspiel
-   zusätzlich die Trumpffarbe. Wer den Stich gewinnt, spielt aus.
-5. Augen: A 11, 10 10, K 4, D 3, B 2. Der Skat zählt für den Alleinspieler, gewonnen ab 61 Augen.
-6. Ergebnis mit Schneider/Schwarz-Hinweis und aufgedecktem Skat, dann „Neue Runde“.
+3. **Reizen** nach Skatordnung: Mittelhand sagt Vorhand (18, 20, 22, 23, 24, 27 …),
+   Vorhand antwortet „Ja“ oder „Passe“. Danach sagt Hinterhand dem Sieger weiter.
+   Hat niemand gereizt, darf Vorhand 18 spielen. Passen alle → **eingepasst**, der Nächste gibt.
+4. Der Alleinspieler nimmt den **Skat** auf und **drückt** 2 Karten – oder spielt **Hand**.
+5. **Ansage:** Kreuz, Pik, Herz, Karo, Grand oder Null. Bei Handspiel zusätzlich Schneider/Schwarz
+   ansagen oder Ouvert. Null Ouvert geht auch nach dem Aufnehmen.
+6. 10 Stiche mit Bedienpflicht. Im Null gibt es keinen Trumpf (Reihenfolge 7 8 9 10 B D K A),
+   und das Spiel endet sofort, wenn der Alleinspieler einen Stich bekommt.
+7. **Abrechnung** mit Rechenweg, z. B. „mit 2 + Spiel + Hand = 4 × 10 = 40“.
+   Überreizt → verloren mit dem nächsthöheren Vielfachen des Grundwerts.
+8. **Punkteliste:** gewonnen +Spielwert, verloren −2× Spielwert; Seeger-Fabian als Zusatzzeile.
+9. **Abbrechen** oder **Abend beenden** nur, wenn alle drei innerhalb von 60 Sekunden zustimmen.
+   Danach zeigt die Abendwertung für alle: Platz, Punkte, Seeger-Fabian, Alleinspiele, bestes Spiel, Dauer.
 
-Jedes Handy bekommt nur die eigenen Handkarten. Klickbar sind nur die Karten, die der Server
-erlaubt, und der Server prüft jeden Zug noch einmal.
+Jedes Handy bekommt nur die eigenen Handkarten (Ausnahme: Ouvert – da liegen die Karten des
+Alleinspielers für alle offen). Klickbar sind nur erlaubte Karten, und der Server prüft jeden Zug.
+
+### Spielwert
+
+| | |
+|---|---|
+| Grundwert | Karo 9 · Herz 10 · Pik 11 · Kreuz 12 · Grand 24 |
+| Stufen | Spitzen (mit/ohne, mit Skat gezählt) + Spiel + Hand + Schneider + Schneider angesagt + Schwarz + Schwarz angesagt + Ouvert |
+| Null | Null 23 · Null Hand 35 · Null Ouvert 46 · Null Ouvert Hand 59 |
+| Gewonnen | ab 61 Augen (Skat bzw. Gedrücktes zählt für den Alleinspieler) |
 
 ## Voraussetzungen
 
@@ -69,9 +86,12 @@ Mit echten Handys im WLAN: `hostname -I` zeigt die IP des Rechners, dann am Hand
 npm test
 ```
 
-- `test/rules.test.js` – Skat-Regeln: Blatt, Mischen, Trumpf, Buben-Reihenfolge, Bedienpflicht, Stichgewinner
-- `test/game.test.js` – Spielablauf, Sichtbarkeit der Karten, 500 simulierte Spiele (immer 120 Augen)
-- `test/room.test.js` – Raum-Logik (Plätze, Tokens, Start, Runden, Aufräumen) ohne Netzwerk
+- `test/rules.test.js` – Blatt, Mischen, Trumpf, Buben-Reihenfolge, Bedienpflicht, Stichgewinner, Null-Regeln
+- `test/scoring.test.js` – Reizwerte, Spitzen, Hand-Zuschlag, Schneider/Schwarz, Überreizen, Null-Werte
+- `test/bidding.test.js` – Reizen nach Skatordnung, Einpassen, 1000 zufällige Reizverläufe
+- `test/game.test.js` – Spielablauf, Skat/Drücken, Null-Ende, Ouvert, Sichtbarkeit, 400 simulierte Runden
+- `test/stats.test.js` – Abendwertung, Seeger-Fabian, Platzierung
+- `test/room.test.js` – Raum-Logik (Plätze, Runden, Punkteliste, Abstimmungen) ohne Netzwerk
 - `test/server.test.js` – echter Server unter `/spiel` mit simulierten Handys, inkl. kompletter Runde
 - `test/security.test.js` – Freigabeliste, Beitritts-Limit, Cache-Busting
 
@@ -143,5 +163,7 @@ mkdirdesign.com {
 
 1. ✅ Spielraum: Name, Live-Liste, 3 Plätze + Zuschauer, „Spiel starten“
 2. ✅ Skat-Grundspiel: Geben, Stiche mit Bedienpflicht, Trumpf, Augen, Gewinner
-3. ⏳ Reizen, Skat aufnehmen/drücken, Ansagen, Spielwert, Punkteliste
-4. ⏳ Design + Animationen
+3. ✅ Reizen, Skat/Hand, alle Spielarten, Spielwert, Punkteliste, Abendwertung
+4. ⏳ 3b Hausregeln: Kontra/Re, Bockrunden, Schenken
+5. ⏳ 3c Spielstand speichern (SQLite im Docker-Volume)
+6. ⏳ 4 Design + Animationen (Wunschliste: [docs/etappe-4-design.md](docs/etappe-4-design.md))
