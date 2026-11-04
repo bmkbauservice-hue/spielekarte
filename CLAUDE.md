@@ -46,7 +46,11 @@ src/
   server.js          Einstiegspunkt (liest Konfiguration, startet Server)
   config.js          Umgebungsvariablen → Konfiguration
   app.js             Express + Socket.IO verdrahten (createApp)
-  rooms/room.js      Reine Raum-Logik (Plätze, Tokens, Start) – ohne Netzwerk, gut testbar
+  rate-limit.js      Gleitendes Zeitfenster gegen Spam
+  game/cards.js      Blatt, Augen, Mischen (crypto) – reine Funktionen
+  game/rules.js      Trumpf, Bedienpflicht, Stichgewinner, Auswertung – reine Funktionen
+  game/game.js       SkatGame: eine Runde (ansagen → 10 Stiche → Ergebnis), viewFor(seat)
+  rooms/room.js      Reine Raum-Logik (Plätze, Tokens, Start, Runden) – ohne Netzwerk, gut testbar
   rooms/registry.js  Verwaltet alle Räume (anlegen, aufräumen)
   public/            Browser-Dateien (HTML, CSS, JS)
 test/                Tests mit node:test
@@ -67,5 +71,14 @@ Immer nur eine Etappe gleichzeitig; jede einzeln testbar.
 
 ## Stand
 
-- Etappe 1: fertig, PR offen (Branch `etappe-1-spielraum`). Lokaler Test mit 3 Tabs über `?profil=a|b|c`.
-- Nächster Schritt: Etappe 2 (Skat-Grundspiel) – Regel-Logik in `src/game/` als reine Funktionen, Tests zuerst.
+- Etappe 1: fertig, live unter https://mkdirdesign.com/spiel (Auto-Deploy bei Merge auf `main`).
+- Etappe 2: fertig, PR offen (Branch `etappe-2-skat`). Vorhand ist Alleinspieler (ohne Reizen),
+  Skat bleibt liegen und zählt für den Alleinspieler. Dazu Review-Punkte: `CARD_IDS`, Beitritts-Limit.
+- Nächster Schritt: Etappe 3 – Reizen, Skat aufnehmen/drücken, Null-Spiele, Spielwert, Punkteliste.
+
+## Konventionen
+
+- Karten als Text `"<farbe>-<wert>"`, Farben `kreuz|pik|herz|karo`, Werte `7 8 9 10 B D K A`.
+- Fehler für Nutzer: `RoomError` / `GameError` mit `code` (für den Client) und deutscher `message`.
+- Statische Dateien in HTML immer mit `?v={{V}}` einbinden (Cache-Busting).
+- Neue Socket-Ereignisse über `action()` in `app.js` (Rate-Limit + Fehlerbehandlung inklusive).

@@ -2,6 +2,7 @@
 // Bewusst OHNE Netzwerk-Code, damit alles mit Unit-Tests prüfbar ist.
 
 import { randomBytes } from 'node:crypto';
+import { SkatGame } from '../game/game.js';
 
 export const SEAT_COUNT = 3;
 export const MAX_SPECTATORS = 20;
@@ -41,12 +42,18 @@ const newToken = () => randomBytes(24).toString('base64url'); // geheim, ~190 Bi
 export class Room {
   /**
    * @param {string} id  bereits normalisierte Karten-ID
-   * @param {{ now?: () => number }} [options]  `now` ist austauschbar, damit Tests die Zeit steuern können
+   * @param {{ now?: () => number, createGame?: (opts: { dealer: number }) => SkatGame }} [options]
+   *   `now` und `createGame` sind austauschbar, damit Tests Zeit und Kartenverteilung steuern können
    */
-  constructor(id, { now = Date.now } = {}) {
+  constructor(id, { now = Date.now, createGame = (opts) => new SkatGame(opts) } = {}) {
     this.id = id;
     this.now = now;
+    this.createGame = createGame;
     this.status = 'lobby'; // 'lobby' | 'running'
+    /** @type {SkatGame|null} aktuelle Runde */
+    this.game = null;
+    this.round = 0;
+    this.dealer = SEAT_COUNT - 1; // erste Runde: Platz 3 gibt → Platz 1 ist Vorhand
     /** @type {Map<string, Player>} token → Spieler */
     this.players = new Map();
     /** @type {(string|null)[]} Token pro Spielplatz */
@@ -158,15 +165,40 @@ export class Room {
     if (p.seat === null) throw new RoomError('NUR_SPIELER', 'Nur Spieler am Tisch können das Spiel starten.');
     if (!this.isReady()) throw new RoomError('NICHT_BEREIT', 'Es müssen 3 verbundene Spieler am Tisch sitzen.');
     this.status = 'running';
+    this.round = 1;
+    this.dealer = SEAT_COUNT - 1;
+    this.game = this.createGame({ dealer: this.dealer });
     this.touch();
   }
 
-  /** Spiel abbrechen, zurück in die Lobby (in Etappe 1 der einzige Weg aus dem Spiel). */
+  /** Spiel abbrechen, zurück in die Lobby. */
   stop(token) {
-    const p = this.require(token);
-    if (this.status !== 'running') throw new RoomError('KEIN_SPIEL', 'Es läuft gerade kein Spiel.');
-    if (p.seat === null) throw new RoomError('NUR_SPIELER', 'Nur Spieler am Tisch können das Spiel beenden.');
+    this.requireSeatedInGame(token, 'das Spiel beenden');
     this.status = 'lobby';
+    this.game = null;
+    this.touch();
+  }
+
+  /** Alleinspieler sagt das Spiel an ({ type: 'grand' } oder { type: 'suit', trump }). */
+  declare(token, game) {
+    const p = this.requireSeatedInGame(token, 'das Spiel ansagen');
+    this.game.declare(p.seat, game);
+    this.touch();
+  }
+
+  playCard(token, card) {
+    const p = this.requireSeatedInGame(token, 'Karten spielen');
+    this.game.play(p.seat, card);
+    this.touch();
+  }
+
+  /** Nach dem Ende einer Runde: neu geben, Geber rückt eins weiter → Alleinspieler wechselt reihum. */
+  nextRound(token) {
+    this.requireSeatedInGame(token, 'eine neue Runde starten');
+    if (this.game.phase !== 'finished') throw new RoomError('RUNDE_LAEUFT', 'Die Runde ist noch nicht zu Ende.');
+    this.dealer = (this.dealer + 1) % SEAT_COUNT;
+    this.round++;
+    this.game = this.createGame({ dealer: this.dealer });
     this.touch();
   }
 
@@ -198,8 +230,8 @@ export class Room {
   // ---------- Sicht eines Spielers ----------
 
   /**
-   * Was ein bestimmter Spieler sehen darf. Enthält NIE Tokens anderer Spieler.
-   * Ab Etappe 2 kommen hier die eigenen Handkarten dazu – und nur die.
+   * Was ein bestimmter Spieler sehen darf. Enthält NIE Tokens anderer Spieler
+   * und NIE fremde Handkarten: Das Spiel liefert die Sicht nur für den eigenen Platz.
    */
   stateFor(token) {
     const me = this.players.get(token) ?? null;
@@ -207,10 +239,12 @@ export class Room {
     return {
       roomId: this.id,
       status: this.status,
+      round: this.round,
       seats: this.seats.map((t) => (t ? pub(this.players.get(t)) : null)),
       spectators: this.spectators().map(pub),
       you: me ? { id: me.id, name: me.name, seat: me.seat } : null,
       canStart: !!me && me.seat !== null && this.isReady(),
+      game: this.game ? this.game.viewFor(me?.seat ?? null) : null,
     };
   }
 
@@ -223,6 +257,14 @@ export class Room {
   require(token) {
     const p = typeof token === 'string' ? this.players.get(token) : undefined;
     if (!p) throw new RoomError('NICHT_IM_RAUM', 'Du bist nicht in diesem Raum.');
+    return p;
+  }
+
+  /** Spieler am Tisch während eines laufenden Spiels – sonst Fehler. */
+  requireSeatedInGame(token, verb) {
+    const p = this.require(token);
+    if (this.status !== 'running' || !this.game) throw new RoomError('KEIN_SPIEL', 'Es läuft gerade kein Spiel.');
+    if (p.seat === null) throw new RoomError('NUR_SPIELER', `Nur Spieler am Tisch können ${verb}.`);
     return p;
   }
 

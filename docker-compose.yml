@@ -8,6 +8,8 @@ services:
     environment:
       PORT: 3000
       BASE_PATH: /spiel
+      # Freigeschaltete Karten, z. B. in .env neben dieser Datei: CARD_IDS=MUJU01,TEST01
+      CARD_IDS: ${CARD_IDS:-}
     expose:
       - "3000"
     networks:
