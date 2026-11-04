@@ -6,8 +6,21 @@ Nur zum Spaß – kein Geld, kein Einsatz.
 Jede Karte hat eine feste URL, z. B. `https://mkdirdesign.com/spiel/k/MUJU01`.
 Die Karten-ID (`MUJU01`) ist der Raum: 3 Plätze am Tisch, beliebig viele Zuschauer (max. 20).
 
-**Stand:** Etappe 3c – echtes Skat mit Hausregeln; Abend, Punkteliste und Bock-Zähler überleben
-Neustarts und Deploys (SQLite). Design folgt in Etappe 4.
+**Stand:** Etappe 4 – echtes Skat mit Hausregeln, Speichern in SQLite und dem MKDIR-Design
+samt Animationen (Misch-Show, Ausspielen, Stich, Siegertreppchen).
+
+## Design
+
+- Farben: Smaragdgrün `#0B2E22`, Flächen `#10402F`, Gold `#E8C766`, Text `#F3EBD6`, Nebentext `#BFD3C8`,
+  Neon-Mint `#3EF2C0` (du bist dran / spielbare Karten), Tischfilz `#0F4A36`, Reizen-Filz `#7A1726`.
+  Alle Werte stehen als CSS-Variablen oben in `src/public/static/style.css`.
+- Schriften (selbst gehostet, keine Google-Verbindung): Cormorant Garamond, Hanken Grotesk, Parisienne.
+  Neu kopieren mit `npm run assets` (holt auch das Logo aus `../mkdir-digital/public/logo-mkdir.webp`).
+- Karten sind reines CSS: Eck-Indizes, B/D/K im Goldrahmen, Symbole ♣︎ ♠︎ ♥︎ ♦︎ mit U+FE0E (kein Emoji).
+- Animationen (`src/public/static/fx.js`) sind nur Show: nur `transform`/`opacity`, Antippen überspringt,
+  `prefers-reduced-motion` → nur kurzes Einblenden. Ton (leises Rascheln) über den Lautsprecher-Knopf, Standard aus.
+- Misch-Show nach jeder neuen Runde (≈ 3 s): Einsammeln → Riffle → einer von vier Tricks (für alle Handys gleich)
+  → Abheben → Geben im Skat-Rhythmus 3 – Skat 2 – 4 – 3.
 
 ## Spielablauf
 
@@ -198,4 +211,4 @@ mkdirdesign.com {
 3. ✅ Reizen, Skat/Hand, alle Spielarten, Spielwert, Punkteliste, Abendwertung
 4. ✅ 3b Hausregeln: Kontra/Re, Bockrunden, Schenken
 5. ✅ 3c Spielstand speichern (SQLite im Docker-Volume)
-6. ⏳ 4 Design + Animationen (Wunschliste: [docs/etappe-4-design.md](docs/etappe-4-design.md))
+6. ✅ 4 Design + Animationen
