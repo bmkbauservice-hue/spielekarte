@@ -124,6 +124,8 @@
     // Spiel
     $('game').hidden = lobby || !state.game;
     if (!lobby && state.game) renderGame(state.game, seated);
+    renderScores();
+    renderAbort(seated);
   }
 
   // ---------- Spiel-Anzeige ----------
@@ -131,69 +133,95 @@
   const SUIT_SYMBOL = { kreuz: '♣', pik: '♠', herz: '♥', karo: '♦' };
   const SUIT_NAME = { kreuz: 'Kreuz', pik: 'Pik', herz: 'Herz', karo: 'Karo' };
   const RANK_NAME = { B: 'Bube', D: 'Dame', K: 'König', A: 'Ass' };
+  const NULL_VALUES = { plain: 23, hand: 35, ouvert: 46, ouvertHand: 59 }; // nur für den Hinweis beim Ansagen
   const nameOf = (seat) => state.seats[seat]?.name ?? `Platz ${seat + 1}`;
+  const isMe = (seat) => seat === state.you.seat;
+
+  // Zustand nur im Browser (bis der Server ihn bestätigt)
+  let handMode = false;            // Alleinspieler hat "Hand spielen" gewählt
+  let choice = null;               // gewähltes Spiel in der Ansage: { type, trump }
+  const discardPick = new Set();   // zum Drücken angetippte Karten
 
   function renderGame(game, seated) {
     const mySeat = state.you.seat;
+    const meDeclarer = game.declarer !== null && isMe(game.declarer);
     const myTurn = game.phase === 'playing' && game.turn === mySeat;
+    if (game.phase !== 'skat') handMode = false;
+    if (game.phase !== 'skat' && game.phase !== 'declaring') choice = null;
+    if (game.phase !== 'discard') discardPick.clear();
 
-    $('game-info').textContent = `Runde ${state.round} · ${gameLabel(game.game)}`;
+    $('game-info').textContent = infoLine(game);
     $('game-players').replaceChildren(...state.seats.map((_, seat) => playerRow(game, seat, mySeat)));
 
     // Tisch: aktueller Stich – oder, wenn der gerade voll wurde, der letzte Stich
-    const showLast = game.trick.length === 0 && game.lastTrick !== null && game.phase !== 'declaring';
+    const inPlay = game.phase === 'playing' || game.phase === 'finished';
+    const showLast = game.trick.length === 0 && game.lastTrick !== null;
     const cards = showLast ? game.lastTrick.cards : game.trick;
-    $('trick-label').textContent = showLast
-      ? `Letzter Stich – ${nameOf(game.lastTrick.winner)} sticht`
-      : game.phase === 'playing' ? 'Aktueller Stich' : '';
-    $('table').hidden = game.phase === 'declaring';
+    $('table').hidden = !inPlay;
+    $('trick-label').textContent = showLast ? `Letzter Stich – ${nameOf(game.lastTrick.winner)} sticht` : 'Aktueller Stich';
     $('trick').classList.toggle('last', showLast);
     $('trick').replaceChildren(...cards.map(({ seat, card }) => trickSlot(seat, card, showLast && seat === game.lastTrick.winner)));
 
+    // Ouvert: offene Karten des Alleinspielers für die anderen
+    $('open-hand').hidden = !game.openHand || meDeclarer;
+    if (game.openHand && !meDeclarer) {
+      $('open-hand-title').textContent = `Offene Karten von ${nameOf(game.declarer)}`;
+      $('open-hand-cards').replaceChildren(...game.openHand.map((c) => cardElement(c)));
+    }
+
     const status = $('game-status');
     status.textContent = statusText(game, mySeat);
-    status.classList.toggle('my-turn', myTurn || (game.phase === 'declaring' && game.declarer === mySeat));
+    status.classList.toggle('my-turn', game.turn === mySeat && game.turn !== null);
 
-    $('declare').hidden = !(game.phase === 'declaring' && game.declarer === mySeat);
+    renderBidding(game, mySeat);
+    $('skat-choice').hidden = !(game.phase === 'skat' && meDeclarer && !handMode);
+    $('skat-choice-info').textContent = `Gereizt bis ${game.bid}. Mit dem Skat bekommst du 2 Karten dazu und drückst 2 – Hand zählt eine Stufe mehr.`;
+    $('discard').hidden = !(game.phase === 'discard' && meDeclarer);
+    $('btn-discard').disabled = discardPick.size !== 2;
+    renderDeclare(game, meDeclarer);
+    $('passed').hidden = game.phase !== 'passed';
+    $('btn-redeal').hidden = !seated;
     renderResult(game, seated);
+    renderHand(game, myTurn, meDeclarer);
 
-    // Eigene Hand: nur erlaubte Karten sind anklickbar
-    const legal = new Set(game.legal);
-    $('hand').hidden = !game.hand;
-    $('hand').replaceChildren(...(game.hand ?? []).map((card) => {
-      const el = cardElement(card, 'button');
-      const playable = myTurn && legal.has(card);
-      el.dataset.card = card;
-      el.disabled = !playable;
-      el.classList.toggle('playable', playable);
-      el.classList.toggle('blocked', myTurn && !playable);
-      return el;
-    }));
-
-    $('btn-stop').hidden = !seated;
+    $('btn-abort').hidden = !seated || !!state.abortVote;
   }
 
-  function gameLabel(g) {
-    if (!g) return 'Spiel wird angesagt';
-    if (g.type === 'grand') return 'Grand – nur Buben sind Trumpf';
-    return `${SUIT_SYMBOL[g.trump]} ${SUIT_NAME[g.trump]} ist Trumpf`;
+  function infoLine(game) {
+    const parts = [`Runde ${state.round}`];
+    if (game.phase === 'bidding') parts.push('Reizen');
+    else if (game.phase === 'passed') parts.push('eingepasst');
+    else {
+      parts.push(game.label || 'Ansage folgt');
+      parts.push(`${nameOf(game.declarer)} spielt (${game.bid})`);
+    }
+    if (game.game?.type === 'null') parts.push('kein Trumpf');
+    else if (game.game?.type === 'grand') parts.push('nur Buben Trumpf');
+    else if (game.game?.type === 'suit') parts.push(`${SUIT_SYMBOL[game.game.trump]} ist Trumpf`);
+    return parts.join(' · ');
   }
 
   function statusText(game, mySeat) {
-    if (game.phase === 'declaring') {
-      return game.declarer === mySeat ? 'Du bist Alleinspieler – wähle dein Spiel.' : `${nameOf(game.declarer)} wählt das Spiel …`;
+    const d = game.declarer !== null ? nameOf(game.declarer) : '';
+    const mine = game.turn === mySeat;
+    switch (game.phase) {
+      case 'bidding':
+        if (game.bidding.passed.includes(mySeat)) return 'Du hast gepasst.';
+        return mine ? 'Du bist beim Reizen dran.' : `${nameOf(game.turn)} überlegt …`;
+      case 'skat': return mine ? 'Du hast das Reizen gewonnen!' : `${d} entscheidet: Skat oder Hand …`;
+      case 'discard': return mine ? 'Wähle 2 Karten zum Drücken.' : `${d} drückt …`;
+      case 'declaring': return mine ? 'Sag dein Spiel an.' : `${d} sagt an …`;
+      case 'playing':
+        if (!mine) return `${nameOf(game.turn)} ist dran …`;
+        return game.trick.length === 0 ? 'Du bist dran – spiel aus!' : 'Du bist dran!';
+      default: return '';
     }
-    if (game.phase === 'playing') {
-      if (game.turn !== mySeat) return `${nameOf(game.turn)} ist dran …`;
-      return game.trick.length === 0 ? 'Du bist dran – spiel aus!' : 'Du bist dran!';
-    }
-    return '';
   }
 
   function playerRow(game, seat, mySeat) {
     const li = document.createElement('li');
     li.className = 'gp';
-    if (seat === game.turn && game.phase !== 'finished') li.classList.add('turn');
+    if (seat === game.turn) li.classList.add('turn');
     if (seat === mySeat) li.classList.add('me');
     const person = state.seats[seat];
 
@@ -202,15 +230,118 @@
     name.textContent = nameOf(seat);
     const meta = document.createElement('span');
     meta.className = 'gp-meta';
-    meta.textContent = `${game.handCounts[seat]} Karten · ${game.tricksWon[seat]} ${game.tricksWon[seat] === 1 ? 'Stich' : 'Stiche'}`;
+    const tricks = game.tricksWon[seat];
+    meta.textContent = game.phase === 'playing' || game.phase === 'finished'
+      ? `${game.handCounts[seat]} Karten · ${tricks} ${tricks === 1 ? 'Stich' : 'Stiche'}`
+      : `${game.handCounts[seat]} Karten`;
 
+    const position = seat === game.forehand ? 'Vorhand' : seat === game.middle ? 'Mittelhand' : 'Hinterhand · Geber';
     li.append(name);
     if (seat === mySeat) li.append(badge('du', 'badge-me'));
     if (seat === game.declarer) li.append(badge('Alleinspieler', 'badge-solo'));
-    if (seat === game.dealer) li.append(badge('Geber', 'badge-dealer'));
+    else li.append(badge(position, 'badge-dealer'));
+    if (game.phase === 'bidding' && game.bidding.passed.includes(seat)) li.append(badge('passe', 'badge-off'));
     if (person && !person.connected) li.append(badge('getrennt', 'badge-off'));
     li.append(meta);
     return li;
+  }
+
+  // ----- Reizen -----
+
+  const BID_WORDS = { bid: (v) => `${v}`, hold: () => 'Ja', pass: () => 'passe' };
+
+  function renderBidding(game, mySeat) {
+    const b = game.bidding;
+    $('bidding').hidden = game.phase !== 'bidding';
+    if (game.phase !== 'bidding') return;
+
+    $('bid-info').textContent = b.stage === 3
+      ? `Niemand hat gereizt. ${nameOf(b.speaker)} (Vorhand) darf 18 spielen oder einpassen.`
+      : `${nameOf(b.speaker)} sagt, ${nameOf(b.listener)} hört · Stand: ${b.value || '–'}`;
+    $('bid-history').replaceChildren(...b.history.slice(-6).map((h) => {
+      const li = document.createElement('li');
+      li.textContent = `${nameOf(h.seat)}: ${BID_WORDS[h.action](h.value)}`;
+      return li;
+    }));
+
+    const mine = b.turn === mySeat;
+    $('bid-actions').hidden = !mine;
+    if (!mine) return;
+    const go = $('btn-bid-go');
+    go.disabled = false;
+    if (b.role === 'listener') {
+      go.textContent = `Ja (${b.pendingValue})`;
+      go.dataset.action = 'hold';
+    } else if (b.role === 'forehand') {
+      go.textContent = '18 spielen';
+      go.dataset.action = 'bid';
+    } else {
+      go.textContent = b.value === 0 ? `${b.pendingValue} sagen` : `Weiter: ${b.pendingValue}`;
+      go.dataset.action = 'bid';
+      go.disabled = b.pendingValue === null;
+    }
+    $('btn-bid-pass').textContent = b.role === 'forehand' ? 'Passe (einpassen)' : 'Passe';
+  }
+
+  // ----- Ansage -----
+
+  function renderDeclare(game, meDeclarer) {
+    const visible = meDeclarer && ((game.phase === 'skat' && handMode) || game.phase === 'declaring');
+    $('declare').hidden = !visible;
+    if (!visible) return;
+    const hand = game.phase === 'skat';
+    $('declare-title').textContent = hand ? 'Handspiel – welches Spiel?' : 'Welches Spiel spielst du?';
+    $('btn-declare-back').hidden = !hand;
+
+    for (const btn of $('declare-types').querySelectorAll('button')) {
+      const selected = choice && btn.dataset.type === choice.type && (btn.dataset.trump ?? null) === (choice.trump ?? null);
+      btn.classList.toggle('selected', !!selected);
+    }
+    const isNull = choice?.type === 'null';
+    // Schneider/Schwarz ansagen nur im Handspiel (nicht Null); Ouvert: Null immer, sonst nur Hand
+    $('opt-schneider-row').hidden = !hand || isNull || !choice;
+    $('opt-schwarz-row').hidden = !hand || isNull || !choice;
+    $('opt-ouvert-row').hidden = !choice || (!isNull && !hand);
+    if ($('opt-ouvert').checked && !isNull) { $('opt-schneider').checked = true; $('opt-schwarz').checked = true; }
+    if ($('opt-schwarz').checked) $('opt-schneider').checked = true;
+
+    let hint = `Gereizt bis ${game.bid}.`;
+    if (isNull) {
+      const ouvert = $('opt-ouvert').checked;
+      const value = ouvert ? (hand ? NULL_VALUES.ouvertHand : NULL_VALUES.ouvert) : (hand ? NULL_VALUES.hand : NULL_VALUES.plain);
+      hint += ` Dieses Null ist ${value} wert${value < game.bid ? ' – zu niedrig!' : '.'}`;
+    }
+    $('declare-hint').textContent = hint;
+    $('btn-declare').disabled = !choice;
+  }
+
+  function declareSpec() {
+    const hidden = (id) => $(id).closest('label').hidden;
+    return {
+      ...choice,
+      schneiderAnnounced: !hidden('opt-schneider') && $('opt-schneider').checked,
+      schwarzAnnounced: !hidden('opt-schwarz') && $('opt-schwarz').checked,
+      ouvert: !hidden('opt-ouvert') && $('opt-ouvert').checked,
+    };
+  }
+
+  // ----- Hand -----
+
+  function renderHand(game, myTurn, meDeclarer) {
+    const discarding = game.phase === 'discard' && meDeclarer;
+    const legal = new Set(game.legal);
+    $('hand').hidden = !game.hand;
+    $('hand').replaceChildren(...(game.hand ?? []).map((card) => {
+      const el = cardElement(card, 'button');
+      const playable = discarding || (myTurn && legal.has(card));
+      el.dataset.card = card;
+      el.disabled = !playable;
+      el.classList.toggle('playable', playable && !discarding);
+      el.classList.toggle('pickable', discarding);
+      el.classList.toggle('selected', discardPick.has(card));
+      el.classList.toggle('blocked', myTurn && !playable);
+      return el;
+    }));
   }
 
   function trickSlot(seat, card, winner) {
@@ -247,25 +378,89 @@
     return el;
   }
 
+  // ----- Ergebnis -----
+
+  const signed = (n) => (n > 0 ? `+${n}` : n < 0 ? `−${-n}` : '0');
+
   function renderResult(game, seated) {
     const r = game.result;
     $('result').hidden = !r;
     if (!r) return;
-    const isMe = game.declarer === state.you.seat;
-    const who = isMe ? 'Du' : nameOf(game.declarer);
-    const verb = r.won ? (isMe ? 'gewinnst' : 'gewinnt') : (isMe ? 'verlierst' : 'verliert');
-    $('result-title').textContent = `${who} ${verb}${r.won ? '!' : '.'}`;
+    const me = isMe(game.declarer);
+    const who = me ? 'Du' : nameOf(game.declarer);
+    const verb = r.won ? (me ? 'gewinnst' : 'gewinnt') : (me ? 'verlierst' : 'verliert');
+    $('result-title').textContent = `${who} ${verb} ${r.label}${r.won ? '!' : '.'}`;
     $('result').classList.toggle('won', r.won);
     $('result').classList.toggle('lost', !r.won);
-    $('result-points').textContent = `Alleinspieler: ${r.declarerPoints} Augen\nGegenspieler: ${r.defenderPoints} Augen`;
-    const extra = [];
-    if (r.schwarz) extra.push('Schwarz!');
-    else if (r.schneider) extra.push('Schneider!');
-    extra.push(`${r.declarerTricks} Stiche für den Alleinspieler, Skat: ${r.skatPoints} Augen`);
-    $('result-extra').textContent = extra.join(' · ');
+    $('result-score').textContent = `${signed(r.score)} Punkte`;
+
+    // Rechenweg: "mit 2 + Spiel + Hand = 4 × 10 = 40"
+    $('result-value').textContent = game.game.type === 'null'
+      ? `${r.label} = ${r.value}${r.won ? '' : ` · verloren zählt doppelt: −${2 * r.value}`}`
+      : `${r.levels.map((l) => l.label).join(' + ')} = ${r.multiplier} × ${r.base} = ${r.multiplier * r.base}`
+        + (r.overbid ? ` → gewertet mit ${r.value}` : '') + (r.won ? '' : ` · verloren zählt doppelt`);
+    $('result-reason').textContent = r.won ? `Gereizt bis ${r.bid}.` : `Verloren: ${r.reason}. Gereizt bis ${r.bid}.`;
+    $('result-points').textContent = game.game.type === 'null'
+      ? `${r.declarerTricks === 0 ? 'Kein Stich' : `${r.declarerTricks} Stich(e)`} für den Alleinspieler`
+      : `Alleinspieler: ${r.declarerPoints} Augen\nGegenspieler: ${r.defenderPoints} Augen`
+        + (r.schwarz ? ' · Schwarz!' : r.schneider ? ' · Schneider!' : '');
     $('result-skat').replaceChildren(...(game.skat ?? []).map((c) => cardElement(c)));
+    $('result-discarded-line').hidden = !game.skatTaken;
+    $('result-discarded').replaceChildren(...(game.discarded ?? []).map((c) => cardElement(c)));
     $('btn-next').hidden = !seated;
     $('result-wait').hidden = seated;
+  }
+
+  // ----- Punkteliste -----
+
+  function renderScores() {
+    const { rounds, totals } = state.scores;
+    $('scores').hidden = rounds.length === 0;
+    if (rounds.length === 0) return;
+    const cell = (tag, text, cls) => {
+      const el = document.createElement(tag);
+      el.textContent = text;
+      if (cls) el.className = cls;
+      return el;
+    };
+    $('scores-head').replaceChildren(cell('th', '#'), cell('th', 'Spiel'), ...state.seats.map((_, i) => cell('th', nameOf(i))));
+    $('scores-body').replaceChildren(...rounds.map((row) => {
+      const tr = document.createElement('tr');
+      tr.append(cell('td', row.round), cell('td', row.label, 'label'));
+      for (let seat = 0; seat < 3; seat++) {
+        const mine = row.declarer === seat;
+        tr.append(cell('td', mine ? signed(row.score) : '', mine ? (row.won ? 'plus' : 'minus') : ''));
+      }
+      return tr;
+    }));
+    $('scores-total').replaceChildren(cell('td', ''), cell('td', 'Summe'), ...totals.map((t) => cell('td', signed(t))));
+  }
+
+  // ----- Abbruch-Abstimmung -----
+
+  let voteDeadline = 0;
+  let prevVote = null;
+  let voteTicker = null;
+
+  function renderAbort(seated) {
+    const vote = state.abortVote;
+    if (prevVote && !vote && state.status === 'running') {
+      toast(state.abortRejectedBy !== null ? `${nameOf(state.abortRejectedBy)} hat den Abbruch abgelehnt.` : 'Abbruch-Abstimmung abgelaufen.');
+    }
+    prevVote = vote;
+    $('abort-banner').hidden = !vote;
+    clearInterval(voteTicker);
+    if (!vote) return;
+    voteDeadline = Date.now() + vote.remainingMs;
+    const mine = seated && !vote.yes.includes(state.you.seat);
+    $('abort-buttons').hidden = !mine;
+    const update = () => {
+      const secs = Math.max(0, Math.ceil((voteDeadline - Date.now()) / 1000));
+      const waiting = vote.waitingFor.map(nameOf).join(', ');
+      $('abort-text').textContent = `${nameOf(vote.by)} möchte das Spiel abbrechen. Noch ${secs} s. Warte auf: ${waiting}.`;
+    };
+    update();
+    voteTicker = setInterval(update, 1000);
   }
 
   function startHint(seats, seated, canStart) {
@@ -347,27 +542,60 @@
     if (btn) act('seat:take', { seat: Number(btn.dataset.seat) });
   });
   $('btn-start').addEventListener('click', () => act('game:start'));
-  $('btn-stop').addEventListener('click', () => {
-    if (confirm('Spiel wirklich beenden?')) act('game:stop');
-  });
   $('btn-leave-seat').addEventListener('click', () => act('seat:leave'));
 
-  $('declare').addEventListener('click', (event) => {
+  // Reizen
+  $('btn-bid-go').addEventListener('click', (e) => act('game:bid', { action: e.currentTarget.dataset.action }));
+  $('btn-bid-pass').addEventListener('click', () => act('game:bid', { action: 'pass' }));
+
+  // Skat oder Hand
+  $('btn-skat').addEventListener('click', () => act('game:skat'));
+  $('btn-hand').addEventListener('click', () => { handMode = true; render(); });
+  $('btn-declare-back').addEventListener('click', () => { handMode = false; choice = null; render(); });
+
+  // Drücken
+  $('btn-discard').addEventListener('click', () => act('game:discard', { cards: [...discardPick] }));
+
+  // Ansage: erst Spiel wählen, Optionen setzen, dann "Ansagen"
+  $('declare-types').addEventListener('click', (event) => {
     const btn = event.target.closest('button[data-type]');
-    if (btn) act('game:declare', { type: btn.dataset.type, trump: btn.dataset.trump });
+    if (!btn) return;
+    choice = { type: btn.dataset.type, ...(btn.dataset.trump ? { trump: btn.dataset.trump } : {}) };
+    render();
+  });
+  for (const id of ['opt-schneider', 'opt-schwarz', 'opt-ouvert']) $(id).addEventListener('change', render);
+  $('btn-declare').addEventListener('click', async () => {
+    const res = await act('game:declare', declareSpec());
+    if (res.ok) for (const id of ['opt-schneider', 'opt-schwarz', 'opt-ouvert']) $(id).checked = false;
   });
 
-  // Doppeltippen verhindern: bis zur Antwort des Servers keine zweite Karte schicken
+  // Hand: beim Drücken Karten auswählen, sonst spielen.
+  // Doppeltippen verhindern: bis zur Antwort des Servers keine zweite Karte schicken.
   let playing = false;
   $('hand').addEventListener('click', async (event) => {
     const btn = event.target.closest('button[data-card]');
     if (!btn || btn.disabled || playing) return;
+    const card = btn.dataset.card;
+    if (state.game.phase === 'discard') {
+      if (discardPick.has(card)) discardPick.delete(card);
+      else if (discardPick.size < 2) discardPick.add(card);
+      render();
+      return;
+    }
     playing = true;
-    await act('game:play', { card: btn.dataset.card });
+    await act('game:play', { card });
     playing = false;
   });
 
   $('btn-next').addEventListener('click', () => act('game:next'));
+  $('btn-redeal').addEventListener('click', () => act('game:next'));
+
+  // Abbrechen nur gemeinsam
+  $('btn-abort').addEventListener('click', () => {
+    if (confirm('Abbruch vorschlagen? Alle drei müssen innerhalb von 60 Sekunden zustimmen.')) act('game:abort');
+  });
+  $('btn-abort-yes').addEventListener('click', () => act('game:abort-vote', { agree: true }));
+  $('btn-abort-no').addEventListener('click', () => act('game:abort-vote', { agree: false }));
 
   $('btn-leave').addEventListener('click', async () => {
     if (!confirm('Raum verlassen? Dein Platz wird frei.')) return;
