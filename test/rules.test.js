@@ -8,6 +8,7 @@ import {
 const GRAND = { type: 'grand' };
 const HERZ = { type: 'suit', trump: 'herz' };
 const KREUZ = { type: 'suit', trump: 'kreuz' };
+const NULL = { type: 'null' };
 
 describe('Blatt', () => {
   test('32 verschiedene Karten', () => {
@@ -95,7 +96,8 @@ describe('Trumpf', () => {
   test('isValidGame', () => {
     assert.ok(isValidGame(GRAND));
     assert.ok(isValidGame(HERZ));
-    for (const bad of [null, {}, { type: 'null' }, { type: 'suit' }, { type: 'suit', trump: 'blau' }, 'grand']) {
+    assert.ok(isValidGame(NULL));
+    for (const bad of [null, {}, { type: 'ramsch' }, { type: 'suit' }, { type: 'suit', trump: 'blau' }, 'grand']) {
       assert.equal(isValidGame(bad), false, JSON.stringify(bad));
     }
   });
@@ -206,5 +208,39 @@ describe('Sortierung', () => {
     const hand = ['karo-7', 'herz-A', 'pik-B', 'kreuz-10', 'herz-7', 'kreuz-B', 'pik-K', 'karo-A'];
     assert.deepEqual(sortHand(hand, HERZ), ['kreuz-B', 'pik-B', 'herz-A', 'herz-7', 'kreuz-10', 'pik-K', 'karo-A', 'karo-7']);
     assert.deepEqual(sortHand(hand, GRAND), ['kreuz-B', 'pik-B', 'kreuz-10', 'pik-K', 'herz-A', 'herz-7', 'karo-A', 'karo-7']);
+  });
+});
+
+describe('Null-Spiel', () => {
+  test('kein Trumpf – auch Buben nicht', () => {
+    assert.equal(createDeck().filter((c) => isTrump(c, NULL)).length, 0);
+    assert.equal(effectiveSuit('kreuz-B', NULL), 'kreuz');
+  });
+
+  test('Reihenfolge 7 8 9 10 B D K A', () => {
+    const order = ['herz-7', 'herz-8', 'herz-9', 'herz-10', 'herz-B', 'herz-D', 'herz-K', 'herz-A'];
+    const sortedCards = [...order].reverse().sort((a, b) => cardStrength(a, NULL) - cardStrength(b, NULL));
+    assert.deepEqual(sortedCards, order);
+  });
+
+  test('Bube bedient seine aufgedruckte Farbe', () => {
+    const hand = ['pik-B', 'herz-A', 'kreuz-7'];
+    assert.deepEqual(legalCards(hand, ['pik-A'], NULL), ['pik-B']);
+  });
+
+  test('Bube ausgespielt: dieselbe Farbe bedienen, nicht andere Buben', () => {
+    const hand = ['karo-B', 'kreuz-9', 'kreuz-A'];
+    assert.deepEqual(legalCards(hand, ['kreuz-B'], NULL), ['kreuz-9', 'kreuz-A']);
+  });
+
+  test('Stichgewinner: höchste Karte der Farbe, 10 verliert gegen Bube', () => {
+    assert.equal(trickWinner(['herz-10', 'herz-B', 'herz-9'], NULL), 1);
+    assert.equal(trickWinner(['herz-9', 'herz-10', 'herz-8'], NULL), 1);
+    assert.equal(trickWinner(['pik-7', 'kreuz-B', 'herz-A'], NULL), 0, 'Buben stechen nicht');
+  });
+
+  test('Sortierung im Null: nach Farbe, Buben stehen in ihrer Farbe', () => {
+    const hand = ['kreuz-B', 'herz-10', 'kreuz-A', 'herz-B', 'kreuz-10'];
+    assert.deepEqual(sortHand(hand, NULL), ['kreuz-A', 'kreuz-B', 'kreuz-10', 'herz-B', 'herz-10']);
   });
 });
