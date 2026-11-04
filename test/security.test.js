@@ -99,6 +99,15 @@ describe('Server mit Freigabeliste und Limits', () => {
     assert.deepEqual(names, ['Echt']);
   });
 
+  test('Server meldet beim Verbinden dieselbe Version wie im HTML (Reload nach Deploy)', async () => {
+    const html = await (await fetch(`${origin}/k/MUJU01`)).text();
+    const inHtml = html.match(/<meta name="app-version" content="([0-9a-f]{10})">/)[1];
+    const s = connectClient(origin, { transports: ['websocket'], forceNew: true });
+    clients.push(s);
+    const fromServer = await new Promise((resolve) => s.once('app:version', resolve));
+    assert.equal(fromServer, inHtml);
+  });
+
   test('statische Dateien haben eine Versionsnummer in der URL', async () => {
     const html = await (await fetch(`${origin}/k/MUJU01`)).text();
     const match = html.match(/static\/room\.js\?v=([0-9a-f]{10})"/);

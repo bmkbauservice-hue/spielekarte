@@ -249,8 +249,50 @@ input:focus { outline: 2px solid var(--neon); outline-offset: 1px; }
 /* Ansage */
 .declare-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .btn-suit { background: #fbfaf5; color: var(--card-color); font-size: 1.05rem; }
-.declare-buttons .grand { grid-column: 1 / -1; }
-.declare-buttons small { font-weight: 400; margin-left: 6px; opacity: 0.8; }
+.declare-buttons .selected { box-shadow: 0 0 0 3px var(--neon); }
+.options { display: grid; gap: 8px; margin: 12px 0 4px; }
+.options label { display: flex; align-items: center; gap: 10px; font-size: 1rem; color: var(--text); min-height: 36px; }
+.options input { width: 22px; height: 22px; accent-color: var(--neon); }
+.declare #btn-declare { width: 100%; margin-top: 8px; }
+
+/* Reizen, Skat, Drücken */
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+.bid-info { margin: 0 0 8px; }
+.bid-history { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.bid-history li { font-size: 0.85rem; padding: 2px 10px; border-radius: 999px; background: rgba(0, 0, 0, 0.3); color: var(--muted); }
+.bid-history li:last-child { color: var(--gold-light); }
+.hand .card.pickable { cursor: pointer; }
+.hand .card.selected { transform: translateY(-10px); box-shadow: 0 0 0 3px var(--gold), 0 6px 12px rgba(0, 0, 0, 0.5); }
+.wrap-cards { flex-wrap: wrap; }
+.open-hand h2 { font-size: 0.85rem; }
+
+/* Abbruch-Abstimmung */
+.abort { border-color: var(--danger); }
+.abort p { margin: 0; }
+
+/* Punkteliste */
+.scores-wrap { overflow-x: auto; }
+table.scores { width: 100%; border-collapse: collapse; font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+.scores th, .scores td { padding: 6px 4px; text-align: right; border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
+.scores th:nth-child(2), .scores td:nth-child(2) { text-align: left; }
+.scores th { color: var(--gold); font-weight: 600; max-width: 5em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scores td.label { color: var(--muted); }
+.scores td.plus { color: var(--neon); font-weight: 700; }
+.scores td.minus { color: var(--danger); font-weight: 700; }
+.scores tfoot td { font-weight: 800; color: var(--gold-light); border-bottom: none; border-top: 1px solid var(--line); }
+.scores tfoot tr.sf td { font-weight: 500; color: var(--muted); border-top: none; font-size: 0.8rem; }
+
+.game-footer { display: grid; gap: 4px; }
+
+/* Abendwertung */
+.summary-players { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 8px; }
+.sp { padding: 10px 12px; border-radius: 12px; background: rgba(0, 0, 0, 0.22); border: 1px solid rgba(255, 255, 255, 0.06); }
+.sp.place-1 { border-color: var(--gold); box-shadow: 0 0 14px rgba(212, 175, 55, 0.25); }
+.sp-head { display: flex; align-items: baseline; gap: 8px; }
+.sp-place { color: var(--gold); font-weight: 800; }
+.sp-name { font-weight: 700; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-points { font-weight: 800; font-size: 1.2rem; font-variant-numeric: tabular-nums; }
+.sp-details { margin: 4px 0 0; font-size: 0.85rem; color: var(--muted); }
 
 /* Ergebnis */
 .result { display: grid; gap: 10px; text-align: center; }
@@ -260,7 +302,12 @@ input:focus { outline: 2px solid var(--neon); outline-offset: 1px; }
 .result.lost { border-color: var(--danger); }
 .result.lost h2 { color: var(--danger); }
 .result p { margin: 0; }
-.result-points { font-weight: 700; white-space: pre-line; }
+.result-points { white-space: pre-line; color: var(--muted); }
+.result-score { font-size: 1.8rem; font-weight: 800; }
+.result.won .result-score { color: var(--neon); }
+.result.lost .result-score { color: var(--danger); }
+.result-value { font-weight: 600; }
+.result-reason { color: var(--muted); font-size: 0.9rem; }
 .skat-line { display: flex; align-items: center; justify-content: center; gap: 8px; }
 
 @media (prefers-reduced-motion: reduce) {

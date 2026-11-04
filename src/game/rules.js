@@ -1,9 +1,11 @@
 // Skat-Regeln als reine Funktionen: Trumpf, Bedienpflicht, Stichgewinner, Auswertung.
 //
-// Ein "Spiel" (game) ist entweder
+// Ein "Spiel" (game) ist
 //   { type: 'grand' }                 → nur die 4 Buben sind Trumpf
 //   { type: 'suit', trump: 'herz' }   → Buben + alle Karten der Trumpffarbe sind Trumpf
-// Null-Spiele kommen erst in Etappe 3.
+//   { type: 'null' }                  → kein Trumpf, Buben gehören zu ihrer Farbe,
+//                                       Reihenfolge 7 8 9 10 B D K A
+// (weitere Felder wie hand/ouvert stören hier nicht – sie zählen nur für den Spielwert)
 
 import { SUITS, parseCard } from './cards.js';
 
@@ -11,14 +13,19 @@ export const TRUMP = 'trumpf';
 
 /** Rang innerhalb einer Farbe (ohne Buben): 7 < 8 < 9 < D < K < 10 < A */
 const SUIT_ORDER = ['7', '8', '9', 'D', 'K', '10', 'A'];
+/** Null: natürliche Reihenfolge, die 10 steht zwischen 9 und Bube */
+const NULL_ORDER = ['7', '8', '9', '10', 'B', 'D', 'K', 'A'];
+
+export const GAME_TYPES = ['suit', 'grand', 'null'];
 
 export function isValidGame(game) {
   if (!game || typeof game !== 'object') return false;
-  if (game.type === 'grand') return true;
+  if (game.type === 'grand' || game.type === 'null') return true;
   return game.type === 'suit' && SUITS.includes(game.trump);
 }
 
 export function isTrump(card, game) {
+  if (game.type === 'null') return false;
   const { suit, rank } = parseCard(card);
   return rank === 'B' || (game.type === 'suit' && suit === game.trump);
 }
@@ -39,6 +46,7 @@ export function effectiveSuit(card, game) {
  */
 export function cardStrength(card, game) {
   const { suit, rank } = parseCard(card);
+  if (game.type === 'null') return NULL_ORDER.indexOf(rank);
   if (rank === 'B') return 100 + (SUITS.length - 1 - SUITS.indexOf(suit));
   const base = SUIT_ORDER.indexOf(rank);
   return isTrump(card, game) ? 50 + base : base;
@@ -77,21 +85,6 @@ function beats(challenger, current, lead, game) {
   if (cTrump !== kTrump) return cTrump;
   if (!cTrump && effectiveSuit(challenger, game) !== lead) return false; // abgeworfen
   return cardStrength(challenger, game) > cardStrength(current, game);
-}
-
-/**
- * Auswertung aus Sicht des Alleinspielers (inkl. Skat).
- * Gewonnen ab 61 Augen. Schneider: eine Partei hat höchstens 30 Augen. Schwarz: eine Partei ohne Stich.
- */
-export function evaluate(declarerPoints, declarerTricks, totalTricks = 10) {
-  const defenderPoints = 120 - declarerPoints;
-  return {
-    declarerPoints,
-    defenderPoints,
-    won: declarerPoints >= 61,
-    schneider: declarerPoints <= 30 || defenderPoints <= 30,
-    schwarz: declarerTricks === 0 || declarerTricks === totalTricks,
-  };
 }
 
 /** Hand fürs Anzeigen sortieren: Trümpfe zuerst (stärkste links), dann Farben Kreuz, Pik, Herz, Karo. */

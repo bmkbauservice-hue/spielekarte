@@ -4,8 +4,9 @@
 import { Room, RoomError } from './room.js';
 
 export class RoomRegistry {
-  constructor({ now = Date.now, maxRooms = 500, playerIdleMs = 10 * 60_000, roomIdleMs = 6 * 3_600_000 } = {}) {
+  constructor({ now = Date.now, maxRooms = 500, playerIdleMs = 10 * 60_000, roomIdleMs = 6 * 3_600_000, roomOptions = {} } = {}) {
     this.now = now;
+    this.roomOptions = roomOptions; // z. B. kürzere Abstimmungszeit in Tests
     this.maxRooms = maxRooms;
     this.playerIdleMs = playerIdleMs;
     this.roomIdleMs = roomIdleMs;
@@ -23,7 +24,7 @@ export class RoomRegistry {
       if (this.rooms.size >= this.maxRooms) {
         throw new RoomError('SERVER_VOLL', 'Gerade sind zu viele Räume offen. Bitte später erneut versuchen.');
       }
-      room = new Room(id, { now: this.now });
+      room = new Room(id, { ...this.roomOptions, now: this.now });
       this.rooms.set(id, room);
     }
     return room;

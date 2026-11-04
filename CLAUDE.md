@@ -48,8 +48,12 @@ src/
   app.js             Express + Socket.IO verdrahten (createApp)
   rate-limit.js      Gleitendes Zeitfenster gegen Spam
   game/cards.js      Blatt, Augen, Mischen (crypto) – reine Funktionen
-  game/rules.js      Trumpf, Bedienpflicht, Stichgewinner, Auswertung – reine Funktionen
-  game/game.js       SkatGame: eine Runde (ansagen → 10 Stiche → Ergebnis), viewFor(seat)
+  game/rules.js      Trumpf, Bedienpflicht, Stichgewinner (inkl. Null) – reine Funktionen
+  game/scoring.js    Reizwerte, Spitzen, Spielwert, Überreizen, Ansage prüfen – reine Funktionen
+  game/bidding.js    Reizen als Zustandsautomat
+  game/stats.js      Abendwertung + Seeger-Fabian aus der Spielhistorie – reine Funktionen
+  game/errors.js     GameError
+  game/game.js       SkatGame: eine Runde (reizen → Skat/Hand → drücken → ansagen → Stiche), viewFor(seat)
   rooms/room.js      Reine Raum-Logik (Plätze, Tokens, Start, Runden) – ohne Netzwerk, gut testbar
   rooms/registry.js  Verwaltet alle Räume (anlegen, aufräumen)
   public/            Browser-Dateien (HTML, CSS, JS)
@@ -63,18 +67,27 @@ test/                Tests mit node:test
    Abschluss: README mit lokalem Test + Dockerfile.
 2. **Skat-Grundspiel** – 32 Karten, mischen, 10 je Spieler + 2 Skat, Stiche mit
    Bedienpflicht, Trumpf bei Farbspiel/Grand, Augen zählen, Gewinner. Tests Pflicht.
-3. **Reizen** (18, 20, 22 …), Skat aufnehmen/drücken, Farbe/Grand/Null ansagen,
-   Spielwert, Punkteliste über mehrere Runden.
-4. **Design + Animationen.**
+3. **Echtes Skat** – Reizen, Skat aufnehmen/drücken oder Hand, Farbe/Grand/Null (+Hand/Ouvert),
+   Spielwert, Punkteliste, Abbrechen/Abend beenden nur gemeinsam, Abendwertung + Seeger-Fabian.
+   - 3b **Hausregeln** (eigenes Modul, pro Tisch beim Start einschaltbar, Standard aus):
+     Kontra/Re, Bockrunden, Schenken. Danach Abendwertung um Kontra/Re/Bock ergänzen.
+   - 3c **Speichern** (z. B. SQLite im Docker-Volume): Abend, Punkteliste, Bock-Zähler überleben Deploys.
+4. **Design + Animationen** – Wunschliste in `docs/etappe-4-design.md`.
 
 Immer nur eine Etappe gleichzeitig; jede einzeln testbar.
 
 ## Stand
 
-- Etappe 1: fertig, live unter https://mkdirdesign.com/spiel (Auto-Deploy bei Merge auf `main`).
-- Etappe 2: fertig, PR offen (Branch `etappe-2-skat`). Vorhand ist Alleinspieler (ohne Reizen),
-  Skat bleibt liegen und zählt für den Alleinspieler. Dazu Review-Punkte: `CARD_IDS`, Beitritts-Limit.
-- Nächster Schritt: Etappe 3 – Reizen, Skat aufnehmen/drücken, Null-Spiele, Spielwert, Punkteliste.
+- Etappe 1 + 2: live unter https://mkdirdesign.com/spiel (Auto-Deploy bei Merge auf `main`, `CARD_IDS` gesetzt).
+- Etappe 3: fertig, PR offen (Branch `etappe-3-reizen`).
+- Nächster Schritt: Etappe 3b (Hausregeln), Branch auf Basis von Etappe 3.
+
+## Entscheidungen (vom Inhaber bestätigt)
+
+- Abstimmung (Abbrechen/Abend beenden): Wer > 2 min getrennt ist, blockiert nicht – sonst hinge der Tisch fest.
+- Null darf nicht angesagt werden, wenn sein Festwert unter dem Reizwert liegt.
+- Schenken: Null-Spiele ausgenommen. Angenommen + überreizt → gewonnen mit dem kleinsten Vielfachen ≥ Reizwert.
+  OFFEN: Abgelehnt → „Schneider wird Pflicht“ (erste Antwort) oder „normal ausspielen“ (Komplett-Prompt)?
 
 ## Konventionen
 
@@ -82,3 +95,7 @@ Immer nur eine Etappe gleichzeitig; jede einzeln testbar.
 - Fehler für Nutzer: `RoomError` / `GameError` mit `code` (für den Client) und deutscher `message`.
 - Statische Dateien in HTML immer mit `?v={{V}}` einbinden (Cache-Busting).
 - Neue Socket-Ereignisse über `action()` in `app.js` (Rate-Limit + Fehlerbehandlung inklusive).
+- Socket-Ereignisse: `game:bid {action}`, `game:skat`, `game:discard {cards}`, `game:declare {…}`,
+  `game:play {card}`, `game:next`, `vote:request {kind: abort|end}`, `vote:cast {agree}`,
+  `evening:new`, `evening:lobby`.
+- Eigenschaft und Methode nie gleich benennen (`bid()` vs. `bidValue`).

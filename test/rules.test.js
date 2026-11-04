@@ -2,12 +2,13 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { createDeck, shuffle, parseCard, sumPoints, cardPoints, isCard } from '../src/game/cards.js';
 import {
-  isTrump, effectiveSuit, legalCards, trickWinner, cardStrength, evaluate, sortHand, isValidGame, TRUMP,
+  isTrump, effectiveSuit, legalCards, trickWinner, cardStrength, sortHand, isValidGame, TRUMP,
 } from '../src/game/rules.js';
 
 const GRAND = { type: 'grand' };
 const HERZ = { type: 'suit', trump: 'herz' };
 const KREUZ = { type: 'suit', trump: 'kreuz' };
+const NULL = { type: 'null' };
 
 describe('Blatt', () => {
   test('32 verschiedene Karten', () => {
@@ -95,7 +96,8 @@ describe('Trumpf', () => {
   test('isValidGame', () => {
     assert.ok(isValidGame(GRAND));
     assert.ok(isValidGame(HERZ));
-    for (const bad of [null, {}, { type: 'null' }, { type: 'suit' }, { type: 'suit', trump: 'blau' }, 'grand']) {
+    assert.ok(isValidGame(NULL));
+    for (const bad of [null, {}, { type: 'ramsch' }, { type: 'suit' }, { type: 'suit', trump: 'blau' }, 'grand']) {
       assert.equal(isValidGame(bad), false, JSON.stringify(bad));
     }
   });
@@ -183,28 +185,44 @@ describe('Stichgewinner', () => {
   });
 });
 
-describe('Auswertung', () => {
-  test('61 Augen gewinnt, 60 verliert', () => {
-    assert.equal(evaluate(61, 5).won, true);
-    assert.equal(evaluate(60, 5).won, false);
-    assert.equal(evaluate(60, 5).defenderPoints, 60);
-  });
-
-  test('Schneider und Schwarz', () => {
-    assert.equal(evaluate(90, 8).schneider, true);
-    assert.equal(evaluate(89, 8).schneider, false);
-    assert.equal(evaluate(30, 2).schneider, true);
-    assert.equal(evaluate(31, 2).schneider, false);
-    assert.equal(evaluate(120, 10).schwarz, true);
-    assert.equal(evaluate(0, 0).schwarz, true);
-    assert.equal(evaluate(120, 9).schwarz, false, '120 Augen ohne alle Stiche ist nicht schwarz');
-  });
-});
-
 describe('Sortierung', () => {
   test('Trümpfe zuerst, dann Kreuz, Pik, Herz, Karo – jeweils stärkste zuerst', () => {
     const hand = ['karo-7', 'herz-A', 'pik-B', 'kreuz-10', 'herz-7', 'kreuz-B', 'pik-K', 'karo-A'];
     assert.deepEqual(sortHand(hand, HERZ), ['kreuz-B', 'pik-B', 'herz-A', 'herz-7', 'kreuz-10', 'pik-K', 'karo-A', 'karo-7']);
     assert.deepEqual(sortHand(hand, GRAND), ['kreuz-B', 'pik-B', 'kreuz-10', 'pik-K', 'herz-A', 'herz-7', 'karo-A', 'karo-7']);
+  });
+});
+
+describe('Null-Spiel', () => {
+  test('kein Trumpf – auch Buben nicht', () => {
+    assert.equal(createDeck().filter((c) => isTrump(c, NULL)).length, 0);
+    assert.equal(effectiveSuit('kreuz-B', NULL), 'kreuz');
+  });
+
+  test('Reihenfolge 7 8 9 10 B D K A', () => {
+    const order = ['herz-7', 'herz-8', 'herz-9', 'herz-10', 'herz-B', 'herz-D', 'herz-K', 'herz-A'];
+    const sortedCards = [...order].reverse().sort((a, b) => cardStrength(a, NULL) - cardStrength(b, NULL));
+    assert.deepEqual(sortedCards, order);
+  });
+
+  test('Bube bedient seine aufgedruckte Farbe', () => {
+    const hand = ['pik-B', 'herz-A', 'kreuz-7'];
+    assert.deepEqual(legalCards(hand, ['pik-A'], NULL), ['pik-B']);
+  });
+
+  test('Bube ausgespielt: dieselbe Farbe bedienen, nicht andere Buben', () => {
+    const hand = ['karo-B', 'kreuz-9', 'kreuz-A'];
+    assert.deepEqual(legalCards(hand, ['kreuz-B'], NULL), ['kreuz-9', 'kreuz-A']);
+  });
+
+  test('Stichgewinner: höchste Karte der Farbe, 10 verliert gegen Bube', () => {
+    assert.equal(trickWinner(['herz-10', 'herz-B', 'herz-9'], NULL), 1);
+    assert.equal(trickWinner(['herz-9', 'herz-10', 'herz-8'], NULL), 1);
+    assert.equal(trickWinner(['pik-7', 'kreuz-B', 'herz-A'], NULL), 0, 'Buben stechen nicht');
+  });
+
+  test('Sortierung im Null: nach Farbe, Buben stehen in ihrer Farbe', () => {
+    const hand = ['kreuz-B', 'herz-10', 'kreuz-A', 'herz-B', 'kreuz-10'];
+    assert.deepEqual(sortHand(hand, NULL), ['kreuz-A', 'kreuz-B', 'kreuz-10', 'herz-B', 'herz-10']);
   });
 });
