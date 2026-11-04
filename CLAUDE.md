@@ -60,6 +60,8 @@ src/
   storage/sqlite-store.js  SQLite: eine Zeile pro Raum (JSON-Schnappschuss), Migrationen, Sicherung
 scripts/backup.js    Datensicherung (VACUUM INTO)
   public/            Browser-Dateien (HTML, CSS, JS)
+  public/static/fx.js  Animationen (window.SkatFX) – nur Show, nie Spielzustand
+  public/static/fonts/, img/  selbst gehostete Schriften + Logo (npm run assets)
 test/                Tests mit node:test
 ```
 
@@ -81,9 +83,9 @@ Immer nur eine Etappe gleichzeitig; jede einzeln testbar.
 
 ## Stand
 
-- Etappe 1–3 live. Etappe 3b liegt als PR #5 bereit (#4 landete versehentlich im Branch `etappe-3-reizen`).
-- Etappe 3c: PR offen (Branch `etappe-3c-speichern`, gegen `main`).
-- Nächster Schritt: Etappe 4 – Design + Animationen (Vorgaben im Prompt vom 04.11., Wunschliste `docs/etappe-4-design.md`).
+- Etappe 1–3c live (Spielraum, Skat, Hausregeln, SQLite).
+- Etappe 4 (Design + Animationen): PR offen (Branch `etappe-4-design`).
+- Ideen danach: Spielvideos/Replay, mehrere Tische pro Abend, Statistik über Abende hinweg.
 
 ## Entscheidungen (vom Inhaber bestätigt)
 
@@ -110,3 +112,7 @@ Immer nur eine Etappe gleichzeitig; jede einzeln testbar.
 - Neuer Zustand in Room/SkatGame/Bidding → muss in `toJSON`/`fromJSON` (Room listet Felder explizit!).
   Inkompatible Änderung am Format → `SNAPSHOT_VERSION` hochzählen (alte Räume werden dann übersprungen).
 - Jede Zustandsänderung in `app.js` über `publish(room)` (speichern + senden), nicht nur `broadcast`.
+- Oberfläche: keine `style="…"`-Attribute im HTML (CSP blockiert sie) – Klassen nutzen; per JS `el.style.x` ist erlaubt.
+- Animationen nur mit `transform`/`opacity`, über `fx.js`; Tisch/Hand nur bei geändertem Schlüssel neu zeichnen,
+  sonst würgt jede Server-Nachricht laufende Animationen ab.
+- Cormorant-Ziffern brauchen `font-variant-numeric: lining-nums` (sonst 0 wie „o“, 1 wie „I“).
