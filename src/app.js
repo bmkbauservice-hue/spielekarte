@@ -187,18 +187,39 @@ export function createApp({
         const { room, token } = current(socket);
         fn(room, token, data);
         broadcast(room);
+        scheduleVoteExpiry(room);
       });
 
     action('seat:take', (room, token, { seat }) => room.takeSeat(token, seat));
     action('seat:leave', (room, token) => room.leaveSeat(token));
     action('game:start', (room, token) => room.start(token));
-    action('game:stop', (room, token) => room.stop(token));
-    action('game:declare', (room, token, { type, trump }) => room.declare(token, { type, trump }));
+    action('game:bid', (room, token, { action: what }) => room.bid(token, what));
+    action('game:skat', (room, token) => room.pickUpSkat(token));
+    action('game:discard', (room, token, { cards }) => room.discard(token, cards));
+    action('game:declare', (room, token, { type, trump, schneiderAnnounced, schwarzAnnounced, ouvert }) =>
+      room.declare(token, { type, trump, schneiderAnnounced, schwarzAnnounced, ouvert }));
     action('game:play', (room, token, { card }) => room.playCard(token, card));
     action('game:next', (room, token) => room.nextRound(token));
+    action('game:abort', (room, token) => room.requestAbort(token));
+    action('game:abort-vote', (room, token, { agree }) => room.voteAbort(token, agree === true));
 
     socket.on('disconnect', () => detach(socket));
   });
+
+  // Abbruch-Abstimmung läuft ab, ohne dass jemand klickt → allen Bescheid geben
+  /** @type {Map<string, NodeJS.Timeout>} */
+  const voteTimers = new Map();
+  function scheduleVoteExpiry(room) {
+    clearTimeout(voteTimers.get(room.id));
+    voteTimers.delete(room.id);
+    if (!room.abortVote) return;
+    const timer = setTimeout(() => {
+      voteTimers.delete(room.id);
+      if (room.expireAbortVote()) broadcast(room);
+    }, Math.max(0, room.abortVote.expiresAt - room.now()) + 50);
+    timer.unref();
+    voteTimers.set(room.id, timer);
+  }
 
   // Regelmäßig aufräumen (getrennte Spieler, leere Räume)
   const sweepTimer = setInterval(() => {
@@ -213,6 +234,7 @@ export function createApp({
     close: () =>
       new Promise((resolve) => {
         clearInterval(sweepTimer);
+        for (const timer of voteTimers.values()) clearTimeout(timer);
         io.close(() => resolve());
       }),
   };

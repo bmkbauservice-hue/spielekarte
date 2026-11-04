@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { io as connectClient } from 'socket.io-client';
 import { createApp } from '../src/app.js';
 import { normalizeBasePath } from '../src/config.js';
+import { RoomRegistry } from '../src/rooms/registry.js';
 
 const BASE = '/spiel';
 let server;
@@ -193,7 +194,7 @@ describe('Skat-Runde per Socket.IO', () => {
   }
   const cardsLeft = (s) => s.game.handCounts.reduce((a, b) => a + b, 0);
 
-  test('komplette Runde: nur eigene Karten, nur erlaubte Züge, Ergebnis, neue Runde', async () => {
+  test('komplette Runde: Reizen, Skat, Drücken, Ansage, Stiche, Punkteliste', async () => {
     const phones = [await phone(), await phone(), await phone()];
     const latest = [null, null, null];
     phones.forEach((p, i) => p.on('room:state', (s) => { latest[i] = s; }));
@@ -201,22 +202,34 @@ describe('Skat-Runde per Socket.IO', () => {
       assert.equal((await request(phones[i], 'room:join', { roomId: 'SPIEL1', name })).ok, true);
     }
     await request(phones[0], 'game:start');
-    await waitUntil(() => latest.every((s) => s?.game?.phase === 'declaring'));
+    await waitUntil(() => latest.every((s) => s?.game?.phase === 'bidding'));
 
-    // Auf der Leitung: jedes Handy hat 10 eigene Karten und keine fremde
+    // Auf der Leitung: jedes Handy hat 10 eigene Karten und keine fremde, keinen Skat
     const hands = latest.map((s) => s.game.hand);
-    assert.deepEqual(hands.map((h) => h.length), [10, 10, 10]);
     assert.equal(new Set(hands.flat()).size, 30);
     for (const i of [0, 1, 2]) {
       const json = JSON.stringify(latest[i]);
       for (const card of hands.filter((_, j) => j !== i).flat()) assert.equal(json.includes(`"${card}"`), false);
-      assert.equal(latest[i].game.skat, null);
     }
 
-    const declarer = latest[0].game.declarer;
-    assert.equal(declarer, 0, 'erste Runde: Platz 1 ist Alleinspieler');
-    assert.equal((await request(phones[1], 'game:declare', { type: 'grand' })).code, 'NICHT_ALLEINSPIELER');
-    assert.equal((await request(phones[0], 'game:declare', { type: 'suit', trump: 'pik' })).ok, true);
+    // Reizen: Mittelhand (Platz 2) sagt 18, Vorhand hält, Mittelhand passt, Hinterhand passt → Vorhand spielt 18
+    assert.equal((await request(phones[0], 'game:bid', { action: 'hold' })).code, 'NICHT_DRAN');
+    for (const [seat, act] of [[1, 'bid'], [0, 'hold'], [1, 'pass'], [2, 'pass']]) {
+      assert.equal((await request(phones[seat], 'game:bid', { action: act })).ok, true, `${seat} ${act}`);
+    }
+    await waitUntil(() => latest[0].game.phase === 'skat');
+    assert.equal(latest[0].game.declarer, 0);
+    assert.equal(latest[0].game.bid, 18);
+
+    // Skat aufnehmen, 2 drücken, Grand ansagen
+    assert.equal((await request(phones[1], 'game:skat')).code, 'NICHT_ALLEINSPIELER');
+    assert.equal((await request(phones[0], 'game:skat')).ok, true);
+    await waitUntil(() => latest[0].game.hand.length === 12);
+    const twelve = latest[0].game.hand;
+    assert.equal(JSON.stringify(latest[1]).includes(`"${twelve.find((c) => !hands[0].includes(c))}"`), false, 'Skat bleibt geheim');
+    assert.equal((await request(phones[0], 'game:discard', { cards: twelve.slice(-2) })).ok, true);
+    assert.equal((await request(phones[0], 'game:declare', { type: 'grand', schneiderAnnounced: true })).code, 'NUR_HAND');
+    assert.equal((await request(phones[0], 'game:declare', { type: 'grand' })).ok, true);
 
     let played = 0;
     for (;;) {
@@ -224,8 +237,6 @@ describe('Skat-Runde per Socket.IO', () => {
       const g = latest[0].game;
       if (g.phase === 'finished') break;
       const turn = g.turn;
-      const other = (turn + 1) % 3;
-      assert.equal((await request(phones[other], 'game:play', { card: latest[other].game.hand[0] })).code, 'NICHT_DRAN');
       const mine = latest[turn].game;
       const illegal = mine.hand.find((c) => !mine.legal.includes(c));
       if (illegal) assert.equal((await request(phones[turn], 'game:play', { card: illegal })).code, 'BEDIENPFLICHT');
@@ -233,13 +244,64 @@ describe('Skat-Runde per Socket.IO', () => {
       played++;
     }
 
-    const results = latest.map((s) => s.game.result);
-    assert.equal(results[0].declarerPoints + results[0].defenderPoints, 120);
-    assert.deepEqual(results[1], results[0]);
-    assert.equal(latest[2].game.skat.length, 2, 'Skat wird am Ende aufgedeckt');
+    const result = latest[1].game.result;
+    assert.equal(result.declarerPoints + result.defenderPoints, 120);
+    assert.equal(result.score, result.won ? result.value : -2 * result.value);
+    assert.deepEqual(latest[2].scores.totals, [result.score, 0, 0]);
+    assert.equal(latest[2].game.discarded.length, 2, 'Gedrücktes wird am Ende aufgedeckt');
 
     assert.equal((await request(phones[2], 'game:next')).ok, true);
-    await waitUntil(() => latest.every((s) => s.round === 2 && s.game.phase === 'declaring'));
-    assert.equal(latest[0].game.declarer, 1, 'Alleinspieler wechselt reihum');
+    await waitUntil(() => latest.every((s) => s.round === 2 && s.game.phase === 'bidding'));
+    assert.equal(latest[0].game.forehand, 1, 'Geber rückt weiter');
+  });
+});
+
+describe('Abbruch-Abstimmung per Socket.IO', () => {
+  let app;
+  let url;
+  const sockets = [];
+
+  before(async () => {
+    app = createApp({ registry: new RoomRegistry({ roomOptions: { abortVoteMs: 200 } }) });
+    await new Promise((r) => app.httpServer.listen(0, '127.0.0.1', r));
+    url = `http://127.0.0.1:${app.httpServer.address().port}`;
+  });
+  after(async () => {
+    for (const s of sockets) s.disconnect();
+    await app.close();
+  });
+
+  async function connect(name) {
+    const s = connectClient(url, { transports: ['websocket'], forceNew: true });
+    sockets.push(s);
+    s.latest = null;
+    s.on('room:state', (state) => { s.latest = state; });
+    await new Promise((resolve) => s.once('connect', resolve));
+    await request(s, 'room:join', { roomId: 'ABBRUCH', name });
+    return s;
+  }
+
+  test('einer allein bricht nicht ab; Abstimmung läuft automatisch ab und alle erfahren es', async () => {
+    const [a, b, c] = [await connect('A'), await connect('B'), await connect('C')];
+    await request(a, 'game:start');
+    assert.equal((await request(a, 'game:abort')).ok, true);
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(c.latest.status, 'running');
+    assert.deepEqual(c.latest.abortVote.waitingFor, [1, 2]);
+
+    // ohne weitere Klicks: nach 200 ms schickt der Server allen den neuen Stand
+    const deadline = Date.now() + 1500;
+    while (c.latest.abortVote !== null && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+    assert.equal(c.latest.abortVote, null);
+    assert.equal(b.latest.status, 'running');
+  });
+
+  test('alle drei stimmen zu → Lobby', async () => {
+    const room = app.registry.get('ABBRUCH');
+    const [a, b, c] = sockets.slice(-3);
+    await request(a, 'game:abort');
+    await request(b, 'game:abort-vote', { agree: true });
+    assert.equal((await request(c, 'game:abort-vote', { agree: true })).ok, true);
+    assert.equal(room.status, 'lobby');
   });
 });
