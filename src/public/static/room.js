@@ -130,8 +130,10 @@
     $('start-hint').textContent = lobby ? startHint(seats, seated, state.canStart) : '';
 
     // Spiel
-    $('game').hidden = lobby || !state.game;
-    if (!lobby && state.game) renderGame(state.game, seated);
+    const newDeal = isNewDeal();
+    $('game').hidden = status !== 'running' || !state.game;
+    if (status === 'running' && state.game) renderGame(state.game, seated);
+    if (newDeal) playShuffle();
     $('summary').hidden = status !== 'summary';
     if (status === 'summary') renderSummary(seated);
     // Beim Wechsel in die Abendwertung nach oben scrollen, damit man sie sofort sieht
@@ -143,17 +145,30 @@
 
   // ---------- Spiel-Anzeige ----------
 
-  const SUIT_SYMBOL = { kreuz: '♣', pik: '♠', herz: '♥', karo: '♦' };
+  const VS = '︎'; // Text-Darstellung: ♠︎ statt bunter Emoji-Karte
+  const SUIT_SYMBOL = { kreuz: `♣${VS}`, pik: `♠${VS}`, herz: `♥${VS}`, karo: `♦${VS}` };
   const SUIT_NAME = { kreuz: 'Kreuz', pik: 'Pik', herz: 'Herz', karo: 'Karo' };
   const RANK_NAME = { B: 'Bube', D: 'Dame', K: 'König', A: 'Ass' };
   const NULL_VALUES = { plain: 23, hand: 35, ouvert: 46, ouvertHand: 59 }; // nur für den Hinweis beim Ansagen
   const nameOf = (seat) => state.seats[seat]?.name ?? `Platz ${seat + 1}`;
   const isMe = (seat) => seat === state.you.seat;
+  const FX = window.SkatFX;
 
   // Zustand nur im Browser (bis der Server ihn bestätigt)
   let handMode = false;            // Alleinspieler hat "Hand spielen" gewählt
   let choice = null;               // gewähltes Spiel in der Ansage: { type, trump }
   const discardPick = new Set();   // zum Drücken angetippte Karten
+
+  /** Aus wessen Sicht wird der Tisch gezeichnet? Spieler: eigener Platz unten; Zuschauer: Platz 1 unten. */
+  const viewSeat = () => state.you.seat ?? 0;
+  /** Position eines Platzes relativ zu mir: links sitzt, wer nach mir dran ist (Uhrzeigersinn). */
+  const posOf = (seat) => (seat === viewSeat() ? 'me' : seat === (viewSeat() + 1) % 3 ? 'left' : 'right');
+  const seatAt = (pos) => (pos === 'me' ? viewSeat() : pos === 'left' ? (viewSeat() + 1) % 3 : (viewSeat() + 2) % 3);
+  /** Bildschirm-Rechteck eines Platzes (für Animationen) */
+  const rectOf = (pos) => {
+    const el = pos === 'me' ? (state.game?.hand ? $('hand') : $('me-line')) : $(`opp-${pos}`);
+    return el && el.offsetParent ? el.getBoundingClientRect() : null;
+  };
 
   function renderGame(game, seated) {
     const mySeat = state.you.seat;
@@ -163,18 +178,13 @@
     if (game.phase !== 'skat' && game.phase !== 'declaring') choice = null;
     if (game.phase !== 'discard') discardPick.clear();
 
-    $('game-info').textContent = infoLine(game);
-    $('game-players').replaceChildren(...state.seats.map((_, seat) => playerRow(game, seat, mySeat)));
+    // Vor dem Neuzeichnen merken, wo die Handkarten lagen – für den Flug zum Tisch
+    const handRects = new Map([...$('hand').querySelectorAll('.card[data-card]')].map((el) => [el.dataset.card, el.getBoundingClientRect()]));
 
-    // Tisch: aktueller Stich – oder, wenn der gerade voll wurde, der letzte Stich
-    const inPlay = game.phase === 'playing' || game.phase === 'finished';
-    const showLast = game.trick.length === 0 && game.lastTrick !== null;
-    const cards = showLast ? game.lastTrick.cards : game.trick;
-    $('table').hidden = !inPlay;
-    $('table').classList.toggle('bock', game.bock);
-    $('trick-label').textContent = showLast ? `Letzter Stich – ${nameOf(game.lastTrick.winner)} sticht` : 'Aktueller Stich';
-    $('trick').classList.toggle('last', showLast);
-    $('trick').replaceChildren(...cards.map(({ seat, card }) => trickSlot(seat, card, showLast && seat === game.lastTrick.winner)));
+    renderHead(game);
+    renderOpponents(game, mySeat);
+    renderTable(game, handRects);
+    renderMeLine(game, mySeat);
 
     // Ouvert: offene Karten des Alleinspielers für die anderen
     $('open-hand').hidden = !game.openHand || meDeclarer;
@@ -183,9 +193,11 @@
       $('open-hand-cards').replaceChildren(...game.openHand.map((c) => cardElement(c)));
     }
 
-    const status = $('game-status');
-    status.textContent = statusText(game, mySeat);
-    status.classList.toggle('my-turn', game.turn === mySeat && game.turn !== null);
+    const mine = game.turn === mySeat && game.turn !== null;
+    $('game-status').textContent = statusText(game, mySeat);
+    $('game-status').classList.toggle('my-turn', mine);
+    $('status-pill').classList.toggle('my-turn', mine);
+    $('status-pill').hidden = game.phase === 'finished' || game.phase === 'passed';
 
     renderBidding(game, mySeat);
     renderHouseRulesInGame(game, mySeat, meDeclarer);
@@ -203,18 +215,144 @@
     $('btn-end').hidden = !seated || !!state.vote;
   }
 
-  function infoLine(game) {
-    const parts = [`Runde ${state.round}`];
-    if (game.phase === 'bidding') parts.push('Reizen');
-    else if (game.phase === 'passed') parts.push('eingepasst');
-    else {
-      parts.push(game.label || 'Ansage folgt');
-      parts.push(`${nameOf(game.declarer)} spielt (${game.bid})`);
+  /** Kopfzeile: "Grand · Stich 4 von 10" + "Alleinspieler: Kalle · gereizt bis 48" */
+  function renderHead(game) {
+    const played = game.tricksWon.reduce((a, b) => a + b, 0);
+    let eyebrow;
+    if (game.phase === 'bidding') eyebrow = `Reizen · Runde ${state.round}`;
+    else if (game.phase === 'passed') eyebrow = `Runde ${state.round} · eingepasst`;
+    else if (game.phase === 'playing') eyebrow = `${game.label} · Stich ${Math.min(played + 1, 10)} von 10`;
+    else eyebrow = `${game.label || 'Ansage folgt'} · Runde ${state.round}`;
+    $('game-info').textContent = eyebrow;
+
+    const sub = $('game-sub');
+    sub.replaceChildren();
+    if (game.declarer !== null && game.phase !== 'bidding') {
+      const b = document.createElement('b');
+      b.textContent = isMe(game.declarer) ? 'du' : nameOf(game.declarer);
+      sub.append('Alleinspieler: ', b, ` · gereizt bis ${game.bid}`);
+      if (game.game?.type === 'null') sub.append(' · kein Trumpf');
+      else if (game.game?.type === 'grand') sub.append(' · nur Buben Trumpf');
+      else if (game.game?.type === 'suit') sub.append(` · ${SUIT_SYMBOL[game.game.trump]} ist Trumpf`);
+    } else {
+      sub.textContent = `Geber: ${nameOf(game.dealer)} · ${nameOf(game.forehand)} spielt aus`;
     }
-    if (game.game?.type === 'null') parts.push('kein Trumpf');
-    else if (game.game?.type === 'grand') parts.push('nur Buben Trumpf');
-    else if (game.game?.type === 'suit') parts.push(`${SUIT_SYMBOL[game.game.trump]} ist Trumpf`);
-    return parts.join(' · ');
+  }
+
+  function roleOf(game, seat) {
+    if (seat === game.declarer) return 'Alleinspieler';
+    if (game.declarer !== null && state.you.seat !== null && !isMe(game.declarer) && !isMe(seat)) return 'dein Partner';
+    if (game.phase === 'bidding' && game.bidding.passed.includes(seat)) return 'hat gepasst';
+    return seat === game.forehand ? 'Vorhand' : seat === game.middle ? 'Mittelhand' : 'Hinterhand · Geber';
+  }
+
+  /** Gegner oben: Kartenrücken (Anzahl), Name, Rolle, Badges, Puls wenn dran */
+  function renderOpponents(game, mySeat) {
+    for (const pos of ['left', 'right']) {
+      const seat = seatAt(pos);
+      const el = $(`opp-${pos}`);
+      const person = state.seats[seat];
+      el.classList.toggle('turn', game.turn === seat);
+      const backs = document.createElement('div');
+      backs.className = 'opp-backs';
+      backs.setAttribute('aria-label', `${game.handCounts[seat]} Karten`);
+      for (let i = 0; i < Math.min(game.handCounts[seat], 12); i++) backs.append(backElement(true));
+      const name = document.createElement('div');
+      name.className = 'opp-name';
+      const dot = document.createElement('i');
+      dot.className = `dot${seat === game.declarer ? ' solo' : roleOf(game, seat) === 'dein Partner' ? ' partner' : ''}`;
+      const label = document.createElement('span');
+      label.textContent = nameOf(seat);
+      name.append(dot, label);
+      const role = document.createElement('div');
+      role.className = 'opp-role';
+      const tricks = game.tricksWon[seat];
+      role.textContent = roleOf(game, seat) + (game.phase === 'playing' || game.phase === 'finished' ? ` · ${tricks} ${tricks === 1 ? 'Stich' : 'Stiche'}` : '');
+      const badges = document.createElement('div');
+      badges.className = 'opp-badges';
+      if (seat === game.kontraBy) badges.append(badge('Kontra', 'badge-kontra'));
+      if (seat === game.declarer && game.re) badges.append(badge('Re', 'badge-kontra'));
+      if (person && !person.connected) badges.append(badge('getrennt', 'badge-off'));
+      el.replaceChildren(backs, name, role, badges);
+      void mySeat;
+    }
+  }
+
+  function renderMeLine(game, mySeat) {
+    const el = $('me-line');
+    el.replaceChildren();
+    const seat = viewSeat();
+    const b = document.createElement('b');
+    b.textContent = mySeat === null ? nameOf(seat) : 'Du';
+    const tricks = game.tricksWon[seat];
+    el.append(b, ` · ${roleOf(game, seat)}`);
+    if (game.phase === 'playing' || game.phase === 'finished') el.append(` · ${tricks} ${tricks === 1 ? 'Stich' : 'Stiche'}`);
+    if (seat === game.kontraBy) el.append(badge('Kontra', 'badge-kontra'));
+    if (seat === game.declarer && game.re) el.append(badge('Re', 'badge-kontra'));
+    if (mySeat === null) el.append(badge('Zuschauer', 'badge-dealer'));
+  }
+
+  // ----- Tisch: Stich, Skat, Animationen -----
+
+  let tableKey = null;
+  let shownOnTable = new Set();
+
+  function renderTable(game, handRects) {
+    const showTable = !['bidding', 'passed'].includes(game.phase);
+    $('table').hidden = !showTable;
+    $('table').classList.toggle('bock', game.bock);
+    if (!showTable) { tableKey = null; shownOnTable = new Set(); return; }
+
+    // Skat liegt auf dem Tisch, solange ihn niemand aufgenommen hat
+    const skatOnTable = !game.skatTaken && game.phase !== 'finished';
+    $('table-skat').hidden = !skatOnTable;
+    if (skatOnTable && !$('table-skat').querySelector('.card')) {
+      $('table-skat').querySelector('.cards').replaceChildren(backElement(true), backElement(true));
+    }
+
+    const declTricks = game.declarer !== null ? game.tricksWon[game.declarer] : 0;
+    const defTricks = game.tricksWon.reduce((a, b) => a + b, 0) - declTricks;
+    $('table-tricks').hidden = game.phase !== 'playing' || game.declarer === null;
+    $('table-tricks').replaceChildren('Stiche', document.createElement('br'), Object.assign(document.createElement('b'), {
+      textContent: `${isMe(game.declarer) ? 'Du' : nameOf(game.declarer)} ${declTricks} · Gegner ${defTricks}`,
+    }));
+
+    const showLast = game.trick.length === 0 && game.lastTrick !== null;
+    const cards = showLast ? game.lastTrick.cards : game.trick;
+    $('trick-label').textContent = showLast
+      ? `${isMe(game.lastTrick.winner) ? 'Du stichst' : `${nameOf(game.lastTrick.winner)} sticht`}`
+      : game.phase === 'playing' && cards.length === 0 ? `${nameOf(game.turn)} spielt aus` : '';
+
+    // Nur neu zeichnen, wenn sich die Karten auf dem Tisch wirklich geändert haben
+    const key = `${showLast ? 'L' : 'C'}:${cards.map((t) => `${t.seat}${t.card}`).join(',')}`;
+    if (key === tableKey) return;
+    tableKey = key;
+
+    const before = shownOnTable;
+    shownOnTable = new Set(cards.map((t) => `${t.seat}:${t.card}`));
+    const slots = cards.map(({ seat, card }) => {
+      const slot = document.createElement('div');
+      slot.className = `slot pos-${posOf(seat)}`;
+      if (showLast && seat === game.lastTrick.winner) slot.classList.add('winner');
+      const name = document.createElement('span');
+      name.className = 'slot-name';
+      name.textContent = isMe(seat) ? 'du' : nameOf(seat);
+      const el = cardElement(card);
+      slot.append(el, name);
+      return { slot, el, seat, card, isNew: !before.has(`${seat}:${card}`) };
+    });
+    $('trick').replaceChildren(...slots.map((s) => s.slot));
+
+    // Karte ausspielen: fliegt aus der Hand (bzw. vom Platz des Gegners) in die Tischmitte
+    for (const s of slots.filter((x) => x.isNew)) {
+      const from = isMe(s.seat) ? handRects.get(s.card) : rectOf(posOf(s.seat));
+      FX.flyFrom(s.el, from, { rotate: isMe(s.seat) ? 0 : posOf(s.seat) === 'left' ? -20 : 20 });
+      FX.sound.rustle();
+    }
+    // Stich komplett: die drei Karten rutschen zum Gewinner
+    if (showLast && slots.some((x) => x.isNew)) {
+      FX.sweepTo(slots.map((x) => x.el), rectOf(posOf(game.lastTrick.winner)), { delay: 1000 });
+    }
   }
 
   function statusText(game, mySeat) {
@@ -230,78 +368,102 @@
       case 'gift':
         if (game.gift.awaitingDeclarer) return mine ? 'Dir wird das Spiel geschenkt!' : `${d} entscheidet über das Geschenk …`;
         return isMe(game.declarer) ? 'Die Gegenspieler überlegen, ob sie schenken …' : 'Schenken oder spielen?';
-      case 'playing':
+      case 'playing': {
         if (!mine) return `${nameOf(game.turn)} ist dran …`;
-        return game.trick.length === 0 ? 'Du bist dran – spiel aus!' : 'Du bist dran!';
+        if (game.trick.length === 0) return 'Du bist dran – spiel aus!';
+        const lead = game.trick[0].card;
+        const follow = game.legal.length < game.hand.length;
+        if (!follow) return 'Du bist dran – du darfst jede Karte spielen.';
+        const isTrumpLead = lead.endsWith('-B') || (game.game.type === 'suit' && lead.startsWith(game.game.trump));
+        return isTrumpLead && game.game.type !== 'null'
+          ? 'Du bist dran – Trumpf ist gefragt, du musst bedienen.'
+          : `Du bist dran – ${SUIT_NAME[lead.split('-')[0]]} ausgespielt, du musst bedienen.`;
+      }
       default: return '';
     }
   }
 
-  function playerRow(game, seat, mySeat) {
-    const li = document.createElement('li');
-    li.className = 'gp';
-    if (seat === game.turn) li.classList.add('turn');
-    if (seat === mySeat) li.classList.add('me');
-    const person = state.seats[seat];
+  // ----- Reizen: roter Filz, großes Gebot, Reizwerte-Leiste -----
 
-    const name = document.createElement('span');
-    name.className = 'gp-name';
-    name.textContent = nameOf(seat);
-    const meta = document.createElement('span');
-    meta.className = 'gp-meta';
-    const tricks = game.tricksWon[seat];
-    meta.textContent = game.phase === 'playing' || game.phase === 'finished'
-      ? `${game.handCounts[seat]} Karten · ${tricks} ${tricks === 1 ? 'Stich' : 'Stiche'}`
-      : `${game.handCounts[seat]} Karten`;
-
-    const position = seat === game.forehand ? 'Vorhand' : seat === game.middle ? 'Mittelhand' : 'Hinterhand · Geber';
-    li.append(name);
-    if (seat === mySeat) li.append(badge('du', 'badge-me'));
-    if (seat === game.declarer) li.append(badge('Alleinspieler', 'badge-solo'));
-    else li.append(badge(position, 'badge-dealer'));
-    if (seat === game.kontraBy) li.append(badge('Kontra', 'badge-kontra'));
-    if (seat === game.declarer && game.re) li.append(badge('Re', 'badge-kontra'));
-    if (game.phase === 'bidding' && game.bidding.passed.includes(seat)) li.append(badge('passe', 'badge-off'));
-    if (person && !person.connected) li.append(badge('getrennt', 'badge-off'));
-    li.append(meta);
-    return li;
-  }
-
-  // ----- Reizen -----
-
+  // Reizwerte wie in src/game/scoring.js (nur für die Anzeige der Leiste)
+  const BID_VALUES = (() => {
+    const v = new Set([23, 35, 46, 59]);
+    for (const base of [9, 10, 11, 12]) for (let m = 2; m <= 18; m++) v.add(base * m);
+    for (let m = 2; m <= 11; m++) v.add(24 * m);
+    return [...v].sort((a, b) => a - b);
+  })();
   const BID_WORDS = { bid: (v) => `${v}`, hold: () => 'Ja', pass: () => 'passe' };
 
   function renderBidding(game, mySeat) {
     const b = game.bidding;
     $('bidding').hidden = game.phase !== 'bidding';
     if (game.phase !== 'bidding') return;
+    const mine = b.turn === mySeat;
+    const who = (seat) => (isMe(seat) ? 'du' : nameOf(seat));
 
-    $('bid-info').textContent = b.stage === 3
-      ? `Niemand hat gereizt. ${nameOf(b.speaker)} (Vorhand) darf 18 spielen oder einpassen.`
-      : `${nameOf(b.speaker)} sagt, ${nameOf(b.listener)} hört · Stand: ${b.value || '–'}`;
-    $('bid-history').replaceChildren(...b.history.slice(-6).map((h) => {
+    // Wer sagt, wer hört, wer hat gepasst
+    const info = $('bid-info');
+    info.replaceChildren();
+    if (b.stage === 3) {
+      info.append(`Niemand hat gereizt – ${who(b.speaker)} (Vorhand) darf 18 spielen oder einpassen.`);
+    } else {
+      const s = document.createElement('b');
+      s.textContent = who(b.speaker);
+      const l = document.createElement('b');
+      l.textContent = who(b.listener);
+      info.append(s, isMe(b.speaker) ? ' sagst · ' : ' sagt · ', l, isMe(b.listener) ? ' hörst' : ' hört');
+      if (b.passed.length) info.append(` · ${b.passed.map(who).join(', ')} ${b.passed.length === 1 && !isMe(b.passed[0]) ? 'hat' : 'haben'} gepasst`);
+    }
+
+    // Großes Gebot
+    const value = b.role === 'listener' ? b.value : b.value || null;
+    $('bid-value').textContent = value ? String(value) : '–';
+    $('bid-value').classList.toggle('empty', !value);
+    if (b.role === 'listener') {
+      $('bid-who').textContent = `${isMe(b.speaker) ? 'Du bietest' : `${nameOf(b.speaker)} bietet`}`;
+      $('bid-question').textContent = mine ? 'Hältst du mit?' : `${nameOf(b.listener)} überlegt …`;
+    } else if (b.role === 'forehand') {
+      $('bid-who').textContent = 'Noch kein Gebot';
+      $('bid-question').textContent = mine ? 'Spielst du für 18?' : `${nameOf(b.speaker)} überlegt …`;
+    } else {
+      $('bid-who').textContent = b.value ? 'Gehalten bei' : 'Noch kein Gebot';
+      $('bid-question').textContent = mine ? `Weiter mit ${b.pendingValue}?` : `${nameOf(b.speaker)} überlegt …`;
+    }
+
+    // Leiste: vergangene grau, aktueller gold
+    const current = b.role === 'listener' ? b.value : b.pendingValue ?? b.value;
+    const i = Math.max(0, BID_VALUES.indexOf(current));
+    const shown = BID_VALUES.slice(Math.max(0, i - 4), Math.max(0, i - 4) + 14);
+    $('bid-ladder').replaceChildren(...shown.map((v) => {
       const li = document.createElement('li');
-      li.textContent = `${nameOf(h.seat)}: ${BID_WORDS[h.action](h.value)}`;
+      li.textContent = v;
+      if (v < current) li.className = 'past';
+      else if (v === current) li.className = 'now';
       return li;
     }));
 
-    const mine = b.turn === mySeat;
+    $('bid-history').replaceChildren(...b.history.slice(-6).map((h) => {
+      const li = document.createElement('li');
+      li.textContent = `${who(h.seat)}: ${BID_WORDS[h.action](h.value)}`;
+      return li;
+    }));
+
     $('bid-actions').hidden = !mine;
     if (!mine) return;
     const go = $('btn-bid-go');
     go.disabled = false;
     if (b.role === 'listener') {
-      go.textContent = `Ja (${b.pendingValue})`;
+      go.textContent = `Ja – ${b.pendingValue}`;
       go.dataset.action = 'hold';
     } else if (b.role === 'forehand') {
       go.textContent = '18 spielen';
       go.dataset.action = 'bid';
     } else {
-      go.textContent = b.value === 0 ? `${b.pendingValue} sagen` : `Weiter: ${b.pendingValue}`;
+      go.textContent = `Sage ${b.pendingValue}`;
       go.dataset.action = 'bid';
       go.disabled = b.pendingValue === null;
     }
-    $('btn-bid-pass').textContent = b.role === 'forehand' ? 'Passe (einpassen)' : 'Passe';
+    $('btn-bid-pass').textContent = b.role === 'forehand' ? 'Einpassen' : 'Passe';
   }
 
   // ----- Ansage -----
@@ -346,57 +508,121 @@
     };
   }
 
-  // ----- Hand -----
+  // ----- Hand: überlappend, nur neu zeichnen bei Änderung -----
+
+  let handKey = null;
 
   function renderHand(game, myTurn, meDeclarer) {
+    const hand = $('hand');
     const discarding = game.phase === 'discard' && meDeclarer;
+    const cards = game.hand ?? [];
+    hand.hidden = !game.hand || cards.length === 0; // nach dem letzten Stich keine leere Lücke
     const legal = new Set(game.legal);
-    $('hand').hidden = !game.hand;
-    $('hand').replaceChildren(...(game.hand ?? []).map((card) => {
+    const width = hand.clientWidth || 358;
+    const cardW = Math.min(76, Math.max(54, Math.round(width / 5.4)));
+    const step = cards.length > 1 ? Math.min(cardW * 0.9, (width - cardW) / (cards.length - 1)) : 0;
+    const offset = Math.max(0, (width - (cardW + step * (cards.length - 1))) / 2);
+
+    const key = [width, myTurn, discarding, cards.join(','), [...legal].join(','), [...discardPick].join(',')].join('|');
+    if (key === handKey) return;
+    const firstDeal = handKey !== null && handKey.split('|')[3] === '' && cards.length > 0;
+    handKey = key;
+
+    hand.style.setProperty('--hand-w', `${cardW}px`);
+    hand.replaceChildren(...cards.map((card, i) => {
       const el = cardElement(card, 'button');
       const playable = discarding || (myTurn && legal.has(card));
+      el.type = 'button';
       el.dataset.card = card;
       el.disabled = !playable;
+      el.style.left = `${offset + i * step}px`;
+      el.style.zIndex = String(i + 1);
       el.classList.toggle('playable', playable && !discarding);
       el.classList.toggle('pickable', discarding);
       el.classList.toggle('selected', discardPick.has(card));
       el.classList.toggle('blocked', myTurn && !playable);
       return el;
     }));
+    if (firstDeal) [...hand.children].forEach((el, i) => el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, delay: i * 25, fill: 'backwards' }));
+
+    $('hand-hint').textContent = discarding
+      ? `${discardPick.size} von 2 zum Drücken gewählt`
+      : myTurn ? 'Spielbare Karten sind hervorgehoben – antippen zum Ausspielen' : '';
   }
 
-  function trickSlot(seat, card, winner) {
-    const slot = document.createElement('div');
-    slot.className = 'slot';
-    if (winner) slot.classList.add('winner');
-    const label = document.createElement('span');
-    label.className = 'slot-name';
-    label.textContent = nameOf(seat);
-    slot.append(cardElement(card), label);
-    return slot;
-  }
-
-  /** Karte als einfacher Platzhalter: große Eck-Indizes (B, D, K, A, 10 …) + Farbsymbol. */
+  /**
+   * Kartenvorderseite (CSS, keine Bilddatei): große Eck-Indizes oben links (Wert + Symbol untereinander),
+   * B/D/K mit Buchstabe im Goldrahmen, Zahlen und Ass mit großem Symbol, kleines Symbol unten rechts.
+   */
   function cardElement(card, tag = 'div') {
     const [suit, rank] = card.split('-');
     const el = document.createElement(tag);
     el.className = `card s-${suit}`;
     el.setAttribute('aria-label', `${SUIT_NAME[suit]} ${RANK_NAME[rank] ?? rank}`);
-    const corner = (pos) => {
-      const idx = document.createElement('span');
-      idx.className = `idx idx-${pos}`;
-      const r = document.createElement('b');
-      r.textContent = rank;
-      const s = document.createElement('i');
-      s.textContent = SUIT_SYMBOL[suit];
-      idx.append(r, s);
-      return idx;
-    };
-    const pip = document.createElement('span');
-    pip.className = 'pip';
-    pip.textContent = SUIT_SYMBOL[suit];
-    el.append(corner('tl'), pip, corner('br'));
+    const sym = SUIT_SYMBOL[suit];
+    const idx = document.createElement('span');
+    idx.className = 'idx';
+    idx.setAttribute('aria-hidden', 'true');
+    idx.append(Object.assign(document.createElement('b'), { textContent: rank }), Object.assign(document.createElement('i'), { textContent: sym }));
+    const centre = document.createElement('span');
+    centre.setAttribute('aria-hidden', 'true');
+    if (['B', 'D', 'K'].includes(rank)) {
+      centre.className = 'court';
+      const frame = document.createElement('span');
+      frame.append(Object.assign(document.createElement('b'), { textContent: rank }), Object.assign(document.createElement('i'), { textContent: sym }));
+      centre.append(frame);
+    } else {
+      centre.className = 'pip';
+      centre.textContent = sym;
+    }
+    const br = Object.assign(document.createElement('span'), { className: 'corner-br', textContent: sym });
+    br.setAttribute('aria-hidden', 'true');
+    el.append(idx, centre, br);
     return el;
+  }
+
+  /** Kartenrückseite: Rautenmuster, doppelter Goldrahmen, MKDIR-Logo mit „Design“ im Oval (plain = ohne Logo, für kleine Karten) */
+  function backElement(plain = false) {
+    const el = document.createElement('div');
+    el.className = `card back${plain ? ' plain' : ''}`;
+    el.setAttribute('aria-hidden', 'true');
+    if (!plain) {
+      const oval = document.createElement('span');
+      oval.className = 'back-oval';
+      const img = document.createElement('img');
+      img.src = `${BASE}/static/img/logo-mkdir.webp?v=${APP_VERSION}`;
+      img.alt = '';
+      oval.append(img, Object.assign(document.createElement('span'), { textContent: 'Design' }));
+      el.append(oval);
+    }
+    return el;
+  }
+
+  // ----- Misch-Show beim neuen Geben -----
+
+  let lastDealKey = null;
+
+  /** Neue Runde gegeben? (nicht beim ersten Laden oder Neuladen der Seite) */
+  function isNewDeal() {
+    const key = state.status === 'running' && state.game ? `${state.round}` : null;
+    const fresh = key !== null && lastDealKey !== undefined && lastDealKey !== key && state.game.phase === 'bidding';
+    const firstLoad = lastDealKey === null && key !== null && lastStatus === null;
+    lastDealKey = key;
+    return fresh && !firstLoad;
+  }
+
+  function playShuffle() {
+    const game = state.game;
+    const order = [game.forehand, game.middle, game.rear].map(posOf);
+    FX.shuffle({
+      targets: { me: rectOf('me'), left: rectOf('left'), right: rectOf('right') },
+      order,
+      cutter: isMe(game.middle) ? 'Du' : nameOf(game.middle), // abheben: rechts vom Geber
+      seed: `${ROOM_ID}:${state.round}`,
+      myCards: game.hand ?? [],
+      makeBack: () => backElement(false),
+      makeFront: (card) => cardElement(card),
+    });
   }
 
   // ----- Ergebnis -----
@@ -434,7 +660,13 @@
     $('result-discarded').replaceChildren(...(game.discarded ?? []).map((c) => cardElement(c)));
     $('btn-next').hidden = !seated;
     $('result-wait').hidden = seated;
+    // Spiel gewonnen: kurzes Gold-Funkeln (einmal pro Runde)
+    if (r.won && sparkledRound !== state.round) {
+      sparkledRound = state.round;
+      requestAnimationFrame(() => FX.sparkle($('result'), { y: '22%' }));
+    }
   }
+  let sparkledRound = null;
 
   // ----- Punkteliste -----
 
@@ -477,6 +709,7 @@
       `${s.games} ${s.games === 1 ? 'Spiel' : 'Spiele'}, davon ${s.passed} eingepasst`
       + (state.houseRules.bock ? ` und ${s.bockGames} Bock` : '') + ` · Dauer ${duration(s.durationMs)}`;
     const ranked = [...s.players].sort((a, b) => a.place - b.place || a.seat - b.seat);
+    renderPodium(ranked);
     $('summary-players').replaceChildren(...ranked.map((p) => {
       const li = document.createElement('li');
       li.className = `sp place-${p.place}`;
@@ -507,6 +740,26 @@
     }));
     $('btn-new-evening').hidden = !seated;
     $('btn-to-lobby').hidden = !seated;
+  }
+
+  let podiumKey = null;
+  /** Siegertreppchen: Platz 2 – 1 – 3 nebeneinander, wächst beim ersten Anzeigen herauf */
+  function renderPodium(ranked) {
+    const key = ranked.map((p) => `${p.seat}:${p.points}`).join(',');
+    if (key === podiumKey) return;
+    podiumKey = key;
+    const steps = [ranked[1], ranked[0], ranked[2]].filter(Boolean).map((p) => {
+      const step = document.createElement('div');
+      step.className = `podium-step place-${p.place}`;
+      const who = Object.assign(document.createElement('span'), { className: 'who', textContent: p.name });
+      const pts = Object.assign(document.createElement('span'), { className: 'pts', textContent: signed(p.points) });
+      const block = Object.assign(document.createElement('div'), { className: 'podium-block', textContent: String(p.place) });
+      step.append(who, pts, block);
+      return step;
+    });
+    $('podium').replaceChildren(...steps);
+    FX.podiumRise(steps);
+    if (ranked[0]) FX.sparkle($('podium'), { y: '20%' });
   }
 
   // ----- Abstimmung (Abbrechen / Abend beenden) -----
@@ -592,17 +845,24 @@
   function seatItem(person, index, you, canTake) {
     const li = document.createElement('li');
     li.className = 'seat';
+    const avatar = document.createElement('span');
+    avatar.className = 'avatar';
+    avatar.setAttribute('aria-hidden', 'true');
+    const body = document.createElement('span');
+    body.className = 'seat-body';
     const label = document.createElement('span');
     label.className = 'seat-no';
     label.textContent = `Platz ${index + 1}`;
-    li.append(label);
 
     if (!person) {
       li.classList.add('free');
+      avatar.textContent = '+';
       const free = document.createElement('span');
       free.className = 'seat-name muted';
-      free.textContent = 'frei';
-      li.append(free);
+      free.textContent = `Platz ${index + 1} ist frei`;
+      label.textContent = 'Warten auf Spieler …';
+      body.append(free, label);
+      li.append(avatar, body);
       if (canTake) {
         const btn = document.createElement('button');
         btn.className = 'btn btn-small btn-gold-outline';
@@ -613,7 +873,9 @@
       return li;
     }
 
-    li.append(...personParts(person, person.id === you.id));
+    avatar.textContent = Array.from(person.name)[0]?.toUpperCase() ?? '?';
+    body.append(...personParts(person, person.id === you.id), label);
+    li.append(avatar, body);
     if (person.id === you.id) li.classList.add('me');
     if (!person.connected) li.classList.add('offline');
     return li;
@@ -633,10 +895,9 @@
     const name = document.createElement('span');
     name.className = 'seat-name';
     name.textContent = person.name;
-    const parts = [name];
-    if (isMe) parts.push(badge('du', 'badge-me'));
-    if (!person.connected) parts.push(badge('getrennt', 'badge-off'));
-    return parts;
+    if (isMe) name.append(' ', badge('du', 'badge-me'));
+    if (!person.connected) name.append(' ', badge('getrennt', 'badge-off'));
+    return [name];
   }
 
   function badge(text, cls) {
@@ -647,6 +908,24 @@
   }
 
   // ---------- Aktionen ----------
+
+  // Ton (standardmäßig aus)
+  const soundBtn = $('btn-sound');
+  const syncSound = () => soundBtn.setAttribute('aria-pressed', String(FX.sound.on));
+  syncSound();
+  soundBtn.addEventListener('click', () => {
+    FX.sound.on = !FX.sound.on;
+    syncSound();
+    FX.sound.rustle(0.2, 0.06);
+    toast(FX.sound.on ? 'Ton an – leises Karten-Rascheln' : 'Ton aus');
+  });
+
+  // Hand passt sich an Breite an (Drehen des Handys)
+  let resizeTimer;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => { handKey = null; if (state) render(); }, 150);
+  });
 
   async function act(event, data) {
     const res = await request(event, data);

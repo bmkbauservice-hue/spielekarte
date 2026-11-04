@@ -3,20 +3,32 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#03261b">
+  <meta name="theme-color" content="#0B2E22">
   <meta name="base-path" content="{{BASE}}">
   <meta name="app-version" content="{{V}}">
   <title>Spielraum {{ROOM_ID}} · MKDIR Spielekarte</title>
   <link rel="icon" href="{{BASE}}/static/favicon.svg?v={{V}}" type="image/svg+xml">
+  <link rel="preload" href="{{BASE}}/static/fonts/hanken-grotesk-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="{{BASE}}/static/fonts.css?v={{V}}">
   <link rel="stylesheet" href="{{BASE}}/static/style.css?v={{V}}">
   <script src="{{BASE}}/socket.io/socket.io.js" defer></script>
+  <script src="{{BASE}}/static/fx.js?v={{V}}" defer></script>
   <script src="{{BASE}}/static/room.js?v={{V}}" defer></script>
 </head>
 <body data-room="{{ROOM_ID}}">
   <header class="top">
-    <div class="brand">MKDIR <span>DESIGN</span></div>
+    <div class="brand" aria-label="MKDIR Design">
+      <img src="{{BASE}}/static/img/logo-mkdir.webp?v={{V}}" alt="MKDIR" width="64" height="32">
+      <span aria-hidden="true">Design</span>
+    </div>
     <div class="room-id">Karte <strong>{{ROOM_ID}}</strong></div>
     <div id="conn" class="conn" data-state="off" title="Verbindung"><i></i><span>verbinde …</span></div>
+    <button id="btn-sound" class="icon-btn" type="button" aria-pressed="false" aria-label="Ton an oder aus">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M11 5 6 9H3v6h3l5 4z"></path>
+        <path class="wave" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"></path>
+      </svg>
+    </button>
   </header>
 
   <main class="wrap">
@@ -25,6 +37,7 @@
     </section>
 
     <section id="view-name" class="panel" hidden>
+      <p class="eyebrow">Spielraum · Karte {{ROOM_ID}}</p>
       <h1>Willkommen am Tisch</h1>
       <p class="muted">Gib deinen Namen ein, damit die anderen sehen, wer mitspielt.</p>
       <form id="name-form" autocomplete="off">
@@ -37,28 +50,39 @@
 
     <section id="view-room" hidden>
       <!-- Lobby: Plätze + Start -->
-      <div id="lobby" class="panel">
-        <h2>Am Tisch</h2>
-        <ol id="seats" class="seats"></ol>
-
-        <div class="actions">
-          <button id="btn-start" class="btn btn-neon" hidden>Spiel starten</button>
-          <p id="start-hint" class="muted hint"></p>
-          <button id="btn-leave-seat" class="btn btn-ghost" hidden>Platz freigeben</button>
+      <div id="lobby" class="lobby">
+        <div class="room-hero">
+          <p class="eyebrow">Spielraum · Karte {{ROOM_ID}}</p>
+          <h1>Skat-Runde</h1>
+          <p class="muted">Wer die Karte antippt, setzt sich mit an den Tisch.</p>
         </div>
 
-        <div class="house-rules">
-          <h3>Hausregeln <small class="muted">(gelten für den ganzen Abend)</small></h3>
-          <label><input type="checkbox" data-rule="kontra"> <span><b>Kontra / Re</b><small>Gegenspieler sagt Kontra (×2), Alleinspieler antwortet Re (×4).</small></span></label>
-          <label><input type="checkbox" data-rule="bock"> <span><b>Bockrunden</b><small>Verliert der Alleinspieler nach Kontra/Re: 9 Bock-Spiele mit ×2.</small></span></label>
-          <label><input type="checkbox" data-rule="schenken"> <span><b>Schenken</b><small>Beide Gegenspieler können schenken. Ablehnen → Schneider wird Pflicht.</small></span></label>
+        <div class="panel">
+          <h2 id="seats-title">Am Tisch</h2>
+          <ol id="seats" class="seats"></ol>
+
+          <div class="actions">
+            <p id="start-hint" class="muted hint"></p>
+            <button id="btn-start" class="btn btn-neon btn-lg" hidden>Spiel starten</button>
+            <button id="btn-leave-seat" class="btn btn-gold-outline" hidden>Platz freigeben – nur zuschauen</button>
+          </div>
+
+          <div class="house-rules">
+            <h3>Hausregeln <small>(gelten für den ganzen Abend)</small></h3>
+            <label><input type="checkbox" data-rule="kontra"> <span><b>Kontra / Re</b><small>Gegenspieler sagt Kontra (×2), Alleinspieler antwortet Re (×4).</small></span></label>
+            <label><input type="checkbox" data-rule="bock"> <span><b>Bockrunden</b><small>Verliert der Alleinspieler nach Kontra/Re: 9 Bock-Spiele mit ×2.</small></span></label>
+            <label><input type="checkbox" data-rule="schenken"> <span><b>Schenken</b><small>Beide Gegenspieler können schenken. Ablehnen → Schneider wird Pflicht.</small></span></label>
+          </div>
         </div>
       </div>
 
       <!-- Laufendes Spiel -->
       <div id="game" class="game" hidden>
-        <p id="game-info" class="game-info"></p>
-        <p id="bock-line" class="bock-line" hidden></p>
+        <div class="game-head">
+          <p id="game-info" class="eyebrow"></p>
+          <p id="game-sub" class="game-sub"></p>
+          <p id="bock-line" class="bock-line" hidden></p>
+        </div>
 
         <div id="abort-banner" class="panel abort" hidden>
           <p id="abort-text"></p>
@@ -68,24 +92,37 @@
           </div>
         </div>
 
-        <ol id="game-players" class="game-players"></ol>
+        <!-- Gegner: links sitzt, wer nach mir dran ist (Uhrzeigersinn) -->
+        <div class="opponents">
+          <div id="opp-left" class="opp" data-pos="left"></div>
+          <div id="opp-right" class="opp" data-pos="right"></div>
+        </div>
 
-        <div id="table" class="table">
+        <!-- Spieltisch -->
+        <div id="table" class="felt">
           <p id="trick-label" class="table-label"></p>
           <div id="trick" class="trick"></div>
+          <div id="table-skat" class="table-skat" hidden>
+            <div class="cards"></div>
+            <span>Skat</span>
+          </div>
+          <p id="table-tricks" class="table-tricks"></p>
         </div>
 
         <div id="open-hand" class="panel open-hand" hidden>
           <h2 id="open-hand-title"></h2>
-          <div id="open-hand-cards" class="mini-cards wrap-cards"></div>
+          <div id="open-hand-cards" class="mini-cards"></div>
         </div>
 
-        <p id="game-status" class="game-status" role="status"></p>
+        <div id="status-pill" class="status-pill">
+          <i class="dot" aria-hidden="true"></i>
+          <p id="game-status" role="status"></p>
+        </div>
 
         <!-- Hausregel Kontra / Re -->
         <div id="kontra-row" class="kontra-row" hidden>
-          <button id="btn-kontra" class="btn btn-gold" hidden>Kontra!</button>
-          <button id="btn-re" class="btn btn-gold" hidden>Re!</button>
+          <button id="btn-kontra" class="btn" hidden>Kontra!</button>
+          <button id="btn-re" class="btn" hidden>Re!</button>
         </div>
 
         <!-- Hausregel Schenken -->
@@ -93,23 +130,31 @@
           <h2 id="gift-title">Schenken?</h2>
           <p id="gift-info" class="muted"></p>
           <div id="gift-offer" class="row">
-            <button id="btn-gift-yes" class="btn btn-gold">Schenken</button>
             <button id="btn-gift-no" class="btn btn-ghost">Nicht schenken</button>
+            <button id="btn-gift-yes" class="btn btn-gold">Schenken</button>
           </div>
           <div id="gift-answer" class="row">
-            <button id="btn-gift-accept" class="btn btn-neon">Annehmen</button>
             <button id="btn-gift-refuse" class="btn btn-ghost">Ablehnen</button>
+            <button id="btn-gift-accept" class="btn btn-neon">Annehmen</button>
           </div>
         </div>
 
-        <!-- Reizen -->
-        <div id="bidding" class="panel" hidden>
-          <h2>Reizen</h2>
-          <p id="bid-info" class="bid-info"></p>
-          <ol id="bid-history" class="bid-history"></ol>
+        <!-- Reizen: roter Filz -->
+        <div id="bidding" class="reizen" hidden>
+          <p id="bid-info" class="reizen-info"></p>
+          <div class="reizen-felt">
+            <p id="bid-who" class="reizen-who"></p>
+            <p id="bid-value" class="reizen-value"></p>
+            <p id="bid-question" class="reizen-q"></p>
+          </div>
+          <div>
+            <p class="eyebrow eyebrow-muted">Reizwerte</p>
+            <ol id="bid-ladder" class="ladder" aria-label="Reizwerte"></ol>
+          </div>
+          <ol id="bid-history" class="bid-history" aria-label="Bisher gesagt"></ol>
           <div id="bid-actions" class="row" hidden>
-            <button id="btn-bid-go" class="btn btn-neon"></button>
-            <button id="btn-bid-pass" class="btn btn-ghost">Passe</button>
+            <button id="btn-bid-pass" class="btn btn-ghost btn-lg">Passe</button>
+            <button id="btn-bid-go" class="btn btn-gold btn-lg"></button>
           </div>
         </div>
 
@@ -118,8 +163,8 @@
           <h2>Skat aufnehmen?</h2>
           <p id="skat-choice-info" class="muted"></p>
           <div class="row">
-            <button id="btn-skat" class="btn btn-gold">Skat aufnehmen</button>
             <button id="btn-hand" class="btn btn-gold-outline">Hand spielen</button>
+            <button id="btn-skat" class="btn btn-gold">Skat aufnehmen</button>
           </div>
         </div>
 
@@ -134,10 +179,10 @@
         <div id="declare" class="panel declare" hidden>
           <h2 id="declare-title">Welches Spiel spielst du?</h2>
           <div id="declare-types" class="declare-buttons">
-            <button class="btn btn-suit s-kreuz" data-type="suit" data-trump="kreuz">♣ Kreuz</button>
-            <button class="btn btn-suit s-pik" data-type="suit" data-trump="pik">♠ Pik</button>
-            <button class="btn btn-suit s-herz" data-type="suit" data-trump="herz">♥ Herz</button>
-            <button class="btn btn-suit s-karo" data-type="suit" data-trump="karo">♦ Karo</button>
+            <button class="btn btn-suit s-kreuz" data-type="suit" data-trump="kreuz">♣&#xFE0E; Kreuz</button>
+            <button class="btn btn-suit s-pik" data-type="suit" data-trump="pik">♠&#xFE0E; Pik</button>
+            <button class="btn btn-suit s-herz" data-type="suit" data-trump="herz">♥&#xFE0E; Herz</button>
+            <button class="btn btn-suit s-karo" data-type="suit" data-trump="karo">♦&#xFE0E; Karo</button>
             <button class="btn btn-gold" data-type="grand">Grand</button>
             <button class="btn btn-ghost" data-type="null">Null</button>
           </div>
@@ -147,7 +192,7 @@
             <label id="opt-ouvert-row"><input type="checkbox" id="opt-ouvert"> Ouvert (Karten offen)</label>
           </div>
           <p id="declare-hint" class="muted hint"></p>
-          <button id="btn-declare" class="btn btn-neon" disabled>Ansagen</button>
+          <button id="btn-declare" class="btn btn-neon btn-lg" disabled>Ansagen</button>
           <button id="btn-declare-back" class="btn btn-link" hidden>Zurück – doch Skat aufnehmen?</button>
         </div>
 
@@ -155,7 +200,7 @@
         <div id="passed" class="panel center" hidden>
           <h2>Eingepasst</h2>
           <p class="muted">Alle haben gepasst – der Nächste gibt neu.</p>
-          <button id="btn-redeal" class="btn btn-neon">Neu geben</button>
+          <button id="btn-redeal" class="btn btn-neon btn-lg">Neu geben</button>
         </div>
 
         <!-- Ergebnis -->
@@ -167,11 +212,16 @@
           <p id="result-points" class="result-points"></p>
           <div class="skat-line"><span class="muted">Skat:</span> <span id="result-skat" class="mini-cards"></span></div>
           <div id="result-discarded-line" class="skat-line"><span class="muted">Gedrückt:</span> <span id="result-discarded" class="mini-cards"></span></div>
-          <button id="btn-next" class="btn btn-neon">Neue Runde</button>
+          <button id="btn-next" class="btn btn-neon btn-lg">Neue Runde</button>
           <p id="result-wait" class="muted hint">Ein Spieler am Tisch startet die nächste Runde.</p>
         </div>
 
-        <div id="hand" class="hand" aria-label="Deine Karten"></div>
+        <!-- Eigene Hand -->
+        <div class="hand-wrap">
+          <p id="me-line" class="me-line"></p>
+          <div id="hand" class="hand" aria-label="Deine Karten"></div>
+          <p id="hand-hint" class="hand-hint"></p>
+        </div>
 
         <div class="game-footer">
           <button id="btn-end" class="btn btn-gold-outline" hidden>Abend beenden</button>
@@ -181,12 +231,14 @@
 
       <!-- Abendwertung -->
       <div id="summary" class="panel summary" hidden>
+        <p class="eyebrow">Abend beendet</p>
         <h2>Abendwertung</h2>
         <p id="summary-meta" class="muted"></p>
+        <div id="podium" class="podium" aria-label="Siegertreppchen"></div>
         <ol id="summary-players" class="summary-players"></ol>
         <div class="row">
-          <button id="btn-new-evening" class="btn btn-neon">Neuer Abend</button>
           <button id="btn-to-lobby" class="btn btn-ghost">Zur Lobby</button>
+          <button id="btn-new-evening" class="btn btn-neon">Neuer Abend</button>
         </div>
       </div>
 

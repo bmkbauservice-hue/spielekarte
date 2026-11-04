@@ -3,26 +3,28 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#03261b">
+  <meta name="theme-color" content="#0B2E22">
   <meta name="base-path" content="{{BASE}}">
   <title>MKDIR Spielekarte</title>
   <link rel="icon" href="{{BASE}}/static/favicon.svg?v={{V}}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{BASE}}/static/fonts.css?v={{V}}">
   <link rel="stylesheet" href="{{BASE}}/static/style.css?v={{V}}">
   <script src="{{BASE}}/static/landing.js?v={{V}}" defer></script>
 </head>
 <body>
   <header class="top">
-    <div class="brand">MKDIR <span>DESIGN</span></div>
+    <div class="brand" aria-label="MKDIR Design"><img src="{{BASE}}/static/img/logo-mkdir.webp?v={{V}}" alt="MKDIR" width="64" height="32"><span aria-hidden="true">Design</span></div>
   </header>
   <main class="wrap">
     <section class="panel">
-      <h1>Spielekarte</h1>
+      <p class="eyebrow">MKDIR Design · Spielekarte</p>
+      <h1>Skat am Tisch</h1>
       <p class="muted">Tippe deine Spielekarte ans Handy – oder gib den Code von der Karte ein.</p>
       <form id="code-form" autocomplete="off">
         <label for="code-input">Karten-Code</label>
         <input id="code-input" name="code" required minlength="3" maxlength="16" pattern="[A-Za-z0-9]{3,16}"
                autocapitalize="characters" enterkeyhint="go" placeholder="z. B. MUJU01">
-        <button type="submit" class="btn btn-gold">Zum Tisch</button>
+        <button type="submit" class="btn btn-gold btn-lg">Zum Tisch</button>
       </form>
       <p class="muted small">Nur zum Spaß – ohne Geld, ohne Einsatz.</p>
     </section>
