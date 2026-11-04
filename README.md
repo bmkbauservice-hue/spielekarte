@@ -6,8 +6,8 @@ Nur zum Spaß – kein Geld, kein Einsatz.
 Jede Karte hat eine feste URL, z. B. `https://mkdirdesign.com/spiel/k/MUJU01`.
 Die Karten-ID (`MUJU01`) ist der Raum: 3 Plätze am Tisch, beliebig viele Zuschauer (max. 20).
 
-**Stand:** Etappe 3 – echtes Skat mit Reizen, Skat/Hand, allen Spielarten, Spielwert, Punkteliste und Abendwertung.
-Hausregeln (Kontra/Re, Bock, Schenken) folgen in Etappe 3b, Speichern in Etappe 3c, Design in Etappe 4.
+**Stand:** Etappe 3b – echtes Skat plus Hausregeln (Kontra/Re, Bockrunden, Schenken).
+Speichern folgt in Etappe 3c, Design in Etappe 4.
 
 ## Spielablauf
 
@@ -29,6 +29,14 @@ Hausregeln (Kontra/Re, Bock, Schenken) folgen in Etappe 3b, Speichern in Etappe 
 
 Jedes Handy bekommt nur die eigenen Handkarten (Ausnahme: Ouvert – da liegen die Karten des
 Alleinspielers für alle offen). Klickbar sind nur erlaubte Karten, und der Server prüft jeden Zug.
+
+### Hausregeln (pro Tisch in der Lobby einschaltbar, Standard: aus)
+
+| Regel | So funktioniert sie |
+|---|---|
+| **Kontra / Re** | Ein Gegenspieler sagt vor seiner ersten Karte „Kontra“ → Spielwert ×2. Danach kann der Alleinspieler vor seiner ersten Karte „Re“ sagen → ×4. |
+| **Bockrunden** | Kontra oder Re gesagt **und** Alleinspieler verliert → 9 Bock-Spiele (3 Bockrunden à 3 Spiele) mit ×2. Ein neuer Auslöser hängt 9 weitere hinten an (kein ×4-Stapeln). Eingepasste Spiele zählen als gespielt. Nur zusammen mit Kontra/Re wählbar. |
+| **Schenken** | Nach der Ansage (nur Farbe/Grand ohne Ansagen und ohne Ouvert) können beide Gegenspieler schenken. Lehnt einer ab → normal spielen. Schenken beide: Alleinspieler nimmt an → sofort gewonnen mit einfachem Spielwert (Spitzen + Spiel + Hand, mindestens Reizwert-Vielfaches; Bock zählt mit) – oder lehnt ab → normal spielen, **Schneider wird Pflicht** (gewertet wie „Schneider angesagt“). |
 
 ### Spielwert
 
@@ -90,7 +98,9 @@ npm test
 - `test/scoring.test.js` – Reizwerte, Spitzen, Hand-Zuschlag, Schneider/Schwarz, Überreizen, Null-Werte
 - `test/bidding.test.js` – Reizen nach Skatordnung, Einpassen, 1000 zufällige Reizverläufe
 - `test/game.test.js` – Spielablauf, Skat/Drücken, Null-Ende, Ouvert, Sichtbarkeit, 400 simulierte Runden
-- `test/stats.test.js` – Abendwertung, Seeger-Fabian, Platzierung
+- `test/stats.test.js` – Abendwertung, Seeger-Fabian, Platzierung, Kontra/Re/Bock-Statistik
+- `test/house-rules.test.js` – Faktoren, Bock-Zähler, Kontra/Re-Zeitpunkt, Geschenk-Wert
+- `test/house-rules-game.test.js` – Kontra/Re/Bock im Spiel, Schenken (einer lehnt ab / beide + annehmen / beide + ablehnen)
 - `test/room.test.js` – Raum-Logik (Plätze, Runden, Punkteliste, Abstimmungen) ohne Netzwerk
 - `test/server.test.js` – echter Server unter `/spiel` mit simulierten Handys, inkl. kompletter Runde
 - `test/security.test.js` – Freigabeliste, Beitritts-Limit, Cache-Busting
@@ -164,6 +174,6 @@ mkdirdesign.com {
 1. ✅ Spielraum: Name, Live-Liste, 3 Plätze + Zuschauer, „Spiel starten“
 2. ✅ Skat-Grundspiel: Geben, Stiche mit Bedienpflicht, Trumpf, Augen, Gewinner
 3. ✅ Reizen, Skat/Hand, alle Spielarten, Spielwert, Punkteliste, Abendwertung
-4. ⏳ 3b Hausregeln: Kontra/Re, Bockrunden, Schenken
+4. ✅ 3b Hausregeln: Kontra/Re, Bockrunden, Schenken
 5. ⏳ 3c Spielstand speichern (SQLite im Docker-Volume)
 6. ⏳ 4 Design + Animationen (Wunschliste: [docs/etappe-4-design.md](docs/etappe-4-design.md))

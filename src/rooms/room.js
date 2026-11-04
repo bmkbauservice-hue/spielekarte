@@ -4,6 +4,7 @@
 import { randomBytes } from 'node:crypto';
 import { SkatGame } from '../game/game.js';
 import { simpleTotals, seegerFabianTotals, summarizeEvening } from '../game/stats.js';
+import { DEFAULT_HOUSE_RULES, normalizeHouseRules, nextBockCount, triggersBock } from '../game/house-rules.js';
 
 export const SEAT_COUNT = 3;
 export const MAX_SPECTATORS = 20;
@@ -72,6 +73,10 @@ export class Room {
     this.eveningStartedAt = null;
     /** Abendwertung nach "Abend beenden" */
     this.summary = null;
+    /** Hausregeln für diesen Tisch – in der Lobby einstellbar, während des Abends fest */
+    this.houseRules = { ...DEFAULT_HOUSE_RULES };
+    /** noch zu spielende Bock-Spiele */
+    this.bockRemaining = 0;
     this.status = 'lobby'; // 'lobby' | 'running' | 'summary'
     /** @type {SkatGame|null} aktuelle Runde */
     this.game = null;
@@ -191,7 +196,8 @@ export class Room {
     this.status = 'running';
     this.round = 1;
     this.dealer = SEAT_COUNT - 1;
-    this.game = this.createGame({ dealer: this.dealer });
+    this.bockRemaining = 0;
+    this.game = this.newGame();
     this.scores = []; // neuer Abend = alles auf null
     this.recordedGame = null;
     this.vote = null;
@@ -233,8 +239,39 @@ export class Room {
     }
     this.dealer = (this.dealer + 1) % SEAT_COUNT;
     this.round++;
-    this.game = this.createGame({ dealer: this.dealer });
+    this.game = this.newGame();
     this.touch();
+  }
+
+  newGame() {
+    return this.createGame({ dealer: this.dealer, houseRules: this.houseRules, bock: this.bockRemaining > 0 });
+  }
+
+  /** Hausregeln einstellen – nur in der Lobby, nur Spieler am Tisch. */
+  setHouseRules(token, rules) {
+    const p = this.require(token);
+    this.requireLobby();
+    if (p.seat === null) throw new RoomError('NUR_SPIELER', 'Nur Spieler am Tisch können die Hausregeln ändern.');
+    this.houseRules = normalizeHouseRules(rules);
+    this.touch();
+  }
+
+  // ---------- Hausregeln im Spiel ----------
+
+  sayKontra(token) {
+    this.gameAction(token, 'Kontra sagen', (seat) => this.game.sayKontra(seat));
+  }
+
+  sayRe(token) {
+    this.gameAction(token, 'Re sagen', (seat) => this.game.sayRe(seat));
+  }
+
+  offerGift(token, yes) {
+    this.gameAction(token, 'schenken', (seat) => this.game.offerGift(seat, yes));
+  }
+
+  answerGift(token, accept) {
+    this.gameAction(token, 'das Geschenk annehmen', (seat) => this.game.answerGift(seat, accept));
   }
 
   gameAction(token, verb, fn) {
@@ -244,19 +281,26 @@ export class Room {
     this.touch();
   }
 
-  /** Runde in die Punkteliste eintragen – genau einmal pro Runde. */
+  /** Runde in die Punkteliste (= Spielhistorie) eintragen – genau einmal pro Runde. Danach Bock-Zähler fortschreiben. */
   recordScore() {
     const g = this.game;
     if (this.recordedGame === g) return;
+    const extra = { bock: g.bock, kontraBy: null, re: false, gift: false };
     if (g.phase === 'passed') {
-      this.scores.push({ round: this.round, declarer: null, label: 'eingepasst', bid: null, value: 0, score: 0, won: null });
+      this.scores.push({ round: this.round, declarer: null, label: 'eingepasst', bid: null, value: 0, score: 0, won: null, ...extra });
     } else if (g.phase === 'finished') {
       const r = g.result;
-      this.scores.push({ round: this.round, declarer: g.declarer, label: r.label, bid: g.bidValue, value: r.value, score: r.score, won: r.won });
+      this.scores.push({
+        round: this.round, declarer: g.declarer, label: r.label, bid: g.bidValue, value: r.value, score: r.score, won: r.won,
+        ...extra, kontraBy: r.kontraBy, re: r.re, gift: r.gift,
+      });
     } else {
       return;
     }
     this.recordedGame = g;
+    const row = this.scores.at(-1);
+    const triggered = this.houseRules.bock && triggersBock({ kontra: row.kontraBy !== null, re: row.re, won: row.won });
+    this.bockRemaining = nextBockCount(this.bockRemaining, { wasBock: row.bock, triggered });
   }
 
   /** Summe pro Platz: gewonnen +Spielwert, verloren −2× Spielwert */
@@ -396,6 +440,8 @@ export class Room {
         totals: this.totals(),
         seegerFabian: seegerFabianTotals(this.scores),
       },
+      houseRules: { ...this.houseRules },
+      bockRemaining: this.bockRemaining,
       vote: this.voteView(),
       voteRejectedBy: this.voteRejectedBy,
       summary: this.summary,
