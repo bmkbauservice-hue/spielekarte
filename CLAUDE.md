@@ -52,6 +52,7 @@ src/
   game/scoring.js    Reizwerte, Spitzen, Spielwert, Überreizen, Ansage prüfen – reine Funktionen
   game/bidding.js    Reizen als Zustandsautomat
   game/stats.js      Abendwertung + Seeger-Fabian aus der Spielhistorie – reine Funktionen
+  game/house-rules.js Hausregeln (Kontra/Re, Bock, Schenken) – reine Funktionen; neue Hausregeln kommen hierher
   game/errors.js     GameError
   game/game.js       SkatGame: eine Runde (reizen → Skat/Hand → drücken → ansagen → Stiche), viewFor(seat)
   rooms/room.js      Reine Raum-Logik (Plätze, Tokens, Start, Runden) – ohne Netzwerk, gut testbar
@@ -79,15 +80,19 @@ Immer nur eine Etappe gleichzeitig; jede einzeln testbar.
 ## Stand
 
 - Etappe 1 + 2: live unter https://mkdirdesign.com/spiel (Auto-Deploy bei Merge auf `main`, `CARD_IDS` gesetzt).
-- Etappe 3: fertig, PR offen (Branch `etappe-3-reizen`).
-- Nächster Schritt: Etappe 3b (Hausregeln), Branch auf Basis von Etappe 3.
+- Etappe 3: PR #3 offen (Branch `etappe-3-reizen`).
+- Etappe 3b: PR offen (Branch `etappe-3b-hausregeln`, baut auf Etappe 3 auf → erst #3 mergen).
+- Nächster Schritt: Etappe 3c – Speichern (SQLite im Docker-Volume).
 
 ## Entscheidungen (vom Inhaber bestätigt)
 
 - Abstimmung (Abbrechen/Abend beenden): Wer > 2 min getrennt ist, blockiert nicht – sonst hinge der Tisch fest.
 - Null darf nicht angesagt werden, wenn sein Festwert unter dem Reizwert liegt.
-- Schenken: Null-Spiele ausgenommen. Angenommen + überreizt → gewonnen mit dem kleinsten Vielfachen ≥ Reizwert.
-  OFFEN: Abgelehnt → „Schneider wird Pflicht“ (erste Antwort) oder „normal ausspielen“ (Komplett-Prompt)?
+- Schenken: Abgelehnt → Schneider wird Pflicht (gewertet wie „Schneider angesagt“).
+  Angenommen + überreizt → gewonnen mit dem kleinsten Vielfachen ≥ Reizwert.
+- Schenken nur bei Farbe/Grand ohne Schneider-/Schwarz-Ansage und ohne Ouvert (eigene Festlegung).
+- Bock nur zusammen mit Kontra/Re wählbar (wird nur dadurch ausgelöst).
+- Hausregeln nur in der Lobby änderbar; während eines Abends fest.
 
 ## Konventionen
 
@@ -97,5 +102,6 @@ Immer nur eine Etappe gleichzeitig; jede einzeln testbar.
 - Neue Socket-Ereignisse über `action()` in `app.js` (Rate-Limit + Fehlerbehandlung inklusive).
 - Socket-Ereignisse: `game:bid {action}`, `game:skat`, `game:discard {cards}`, `game:declare {…}`,
   `game:play {card}`, `game:next`, `vote:request {kind: abort|end}`, `vote:cast {agree}`,
-  `evening:new`, `evening:lobby`.
+  `evening:new`, `evening:lobby`, `rules:set {kontra, bock, schenken}`, `game:kontra`, `game:re`,
+  `game:gift {yes}`, `game:gift-answer {accept}`.
 - Eigenschaft und Methode nie gleich benennen (`bid()` vs. `bidValue`).

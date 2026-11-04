@@ -321,3 +321,42 @@ describe('Abbruch-Abstimmung per Socket.IO', () => {
     assert.equal(room.summary, null);
   });
 });
+
+describe('Hausregeln per Socket.IO', () => {
+  test('Hausregeln einstellen, Schenken annehmen, danach Kontra in der nächsten Runde', async () => {
+    const phones = [await phone(), await phone(), await phone()];
+    const latest = [null, null, null];
+    phones.forEach((p, i) => p.on('room:state', (s) => { latest[i] = s; }));
+    for (const [i, name] of ['Hal', 'Ida', 'Jo'].entries()) await request(phones[i], 'room:join', { roomId: 'HAUS01', name });
+
+    assert.equal((await request(phones[1], 'rules:set', { kontra: true, bock: true, schenken: true })).ok, true);
+    await request(phones[0], 'game:start');
+    await new Promise((r) => setTimeout(r, 30));
+    assert.deepEqual(latest[2].houseRules, { kontra: true, bock: true, schenken: true });
+    assert.equal((await request(phones[0], 'rules:set', {})).code, 'SPIEL_LAEUFT');
+
+    // Runde 1: Vorhand (Platz 1) spielt Grand Hand, beide schenken, angenommen
+    for (const [seat, act] of [[1, 'pass'], [2, 'pass'], [0, 'bid']]) await request(phones[seat], 'game:bid', { action: act });
+    await request(phones[0], 'game:declare', { type: 'grand' });
+    assert.equal((await request(phones[1], 'game:gift', { yes: true })).ok, true);
+    assert.equal((await request(phones[0], 'game:gift-answer', { accept: true })).code, 'KEIN_GESCHENK');
+    await request(phones[2], 'game:gift', { yes: true });
+    assert.equal((await request(phones[0], 'game:gift-answer', { accept: true })).ok, true);
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(latest[1].game.result.gift, true);
+    assert.equal(latest[1].scores.rounds[0].gift, true);
+
+    // Runde 2: Geber 0 → Vorhand 1 spielt; Gegenspieler 2 sagt Kontra
+    await request(phones[0], 'game:next');
+    for (const [seat, act] of [[2, 'pass'], [0, 'pass'], [1, 'bid']]) await request(phones[seat], 'game:bid', { action: act });
+    await request(phones[1], 'game:declare', { type: 'grand' });
+    await request(phones[0], 'game:gift', { yes: false });
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(latest[2].game.canKontra, true);
+    assert.equal(latest[1].game.canKontra, false);
+    assert.equal((await request(phones[2], 'game:kontra')).ok, true);
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(latest[0].game.kontraBy, 2);
+    assert.equal(latest[1].game.canRe, true);
+  });
+});

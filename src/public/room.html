@@ -46,11 +46,19 @@
           <p id="start-hint" class="muted hint"></p>
           <button id="btn-leave-seat" class="btn btn-ghost" hidden>Platz freigeben</button>
         </div>
+
+        <div class="house-rules">
+          <h3>Hausregeln <small class="muted">(gelten für den ganzen Abend)</small></h3>
+          <label><input type="checkbox" data-rule="kontra"> <span><b>Kontra / Re</b><small>Gegenspieler sagt Kontra (×2), Alleinspieler antwortet Re (×4).</small></span></label>
+          <label><input type="checkbox" data-rule="bock"> <span><b>Bockrunden</b><small>Verliert der Alleinspieler nach Kontra/Re: 9 Bock-Spiele mit ×2.</small></span></label>
+          <label><input type="checkbox" data-rule="schenken"> <span><b>Schenken</b><small>Beide Gegenspieler können schenken. Ablehnen → Schneider wird Pflicht.</small></span></label>
+        </div>
       </div>
 
       <!-- Laufendes Spiel -->
       <div id="game" class="game" hidden>
         <p id="game-info" class="game-info"></p>
+        <p id="bock-line" class="bock-line" hidden></p>
 
         <div id="abort-banner" class="panel abort" hidden>
           <p id="abort-text"></p>
@@ -73,6 +81,26 @@
         </div>
 
         <p id="game-status" class="game-status" role="status"></p>
+
+        <!-- Hausregel Kontra / Re -->
+        <div id="kontra-row" class="kontra-row" hidden>
+          <button id="btn-kontra" class="btn btn-gold" hidden>Kontra!</button>
+          <button id="btn-re" class="btn btn-gold" hidden>Re!</button>
+        </div>
+
+        <!-- Hausregel Schenken -->
+        <div id="gift" class="panel gift" hidden>
+          <h2 id="gift-title">Schenken?</h2>
+          <p id="gift-info" class="muted"></p>
+          <div id="gift-offer" class="row">
+            <button id="btn-gift-yes" class="btn btn-gold">Schenken</button>
+            <button id="btn-gift-no" class="btn btn-ghost">Nicht schenken</button>
+          </div>
+          <div id="gift-answer" class="row">
+            <button id="btn-gift-accept" class="btn btn-neon">Annehmen</button>
+            <button id="btn-gift-refuse" class="btn btn-ghost">Ablehnen</button>
+          </div>
+        </div>
 
         <!-- Reizen -->
         <div id="bidding" class="panel" hidden>
