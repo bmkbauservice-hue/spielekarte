@@ -1,0 +1,18 @@
+# Produktion: läuft im gemeinsamen Docker-Netz "web", Caddy leitet /spiel hierher.
+services:
+  spielekarte:
+    build: .
+    image: spielekarte:latest
+    container_name: spielekarte
+    restart: unless-stopped
+    environment:
+      PORT: 3000
+      BASE_PATH: /spiel
+    expose:
+      - "3000"
+    networks:
+      - web
+
+networks:
+  web:
+    external: true

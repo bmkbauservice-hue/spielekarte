@@ -67,4 +67,5 @@ Immer nur eine Etappe gleichzeitig; jede einzeln testbar.
 
 ## Stand
 
-- Etappe 1: in Arbeit (Branch `etappe-1-spielraum`)
+- Etappe 1: fertig, PR offen (Branch `etappe-1-spielraum`). Lokaler Test mit 3 Tabs über `?profil=a|b|c`.
+- Nächster Schritt: Etappe 2 (Skat-Grundspiel) – Regel-Logik in `src/game/` als reine Funktionen, Tests zuerst.
