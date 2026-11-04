@@ -111,6 +111,15 @@ export class Bidding {
     this.history.push({ seat, action, value: this.value });
   }
 
+  /** Schnappschuss zum Speichern – reine Daten */
+  toJSON() {
+    return structuredClone({ ...this });
+  }
+
+  static fromJSON(data) {
+    return Object.assign(Object.create(Bidding.prototype), structuredClone(data));
+  }
+
   view() {
     return {
       stage: this.stage,

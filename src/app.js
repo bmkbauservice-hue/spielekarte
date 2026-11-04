@@ -22,6 +22,7 @@ const staticDir = join(publicDir, 'static');
  * @param {{ limit: number, windowMs: number }} [options.joinLimit]  Beitritte pro Verbindung
  * @param {{ limit: number, windowMs: number }} [options.eventLimit] Aktionen pro Verbindung insgesamt
  * @param {number} [options.sweepIntervalMs]
+ * @param {import('./storage/sqlite-store.js').SqliteStore} [options.store]  Speicher; ohne → nur Arbeitsspeicher
  * @param {RoomRegistry} [options.registry]
  */
 export function createApp({
@@ -30,8 +31,14 @@ export function createApp({
   joinLimit = { limit: 10, windowMs: 60_000 },
   eventLimit = { limit: 120, windowMs: 60_000 },
   sweepIntervalMs = 60_000,
-  registry = new RoomRegistry(),
+  store = null,
+  registry = new RoomRegistry({ store }),
 } = {}) {
+  // Gespeicherte Räume laden (nach Neustart/Deploy geht es da weiter, wo alle aufgehört haben)
+  const restored = registry.loadFromStore();
+  if (restored.loaded || restored.skipped) {
+    console.log(`${restored.loaded} Raum/Räume aus der Datenbank geladen${restored.skipped ? `, ${restored.skipped} übersprungen` : ''}.`);
+  }
   const allowedCards = new Set(cardIds);
   const isCardAllowed = (id) => allowedCards.size === 0 || allowedCards.has(id);
 
@@ -80,6 +87,12 @@ export function createApp({
   // Welcher Socket gehört gerade zu welchem Token? (Ein Token = höchstens eine aktive Verbindung)
   /** @type {Map<string, import('socket.io').Socket>} */
   const activeSocket = new Map();
+
+  /** Nach jeder Änderung: erst speichern, dann allen ihren Stand schicken. */
+  function publish(room) {
+    registry.persist(room);
+    broadcast(room);
+  }
 
   /** Jedem Socket im Raum SEINEN Zustand schicken (nicht allen denselben!). */
   function broadcast(room) {
@@ -171,7 +184,7 @@ export function createApp({
       socket.data.token = player.token;
       socket.join(room.id);
       room.connect(player.token);
-      broadcast(room);
+      publish(room);
       return { token: player.token }; // Token geht NUR an diesen einen Socket
     });
 
@@ -181,14 +194,14 @@ export function createApp({
       activeSocket.delete(token);
       socket.leave(room.id);
       socket.data.roomId = socket.data.token = undefined;
-      broadcast(room);
+      publish(room);
     });
 
     const action = (event, fn) =>
       handle(socket, event, (data) => {
         const { room, token } = current(socket);
         fn(room, token, data);
-        broadcast(room);
+        publish(room);
         scheduleVoteExpiry(room);
       });
 
@@ -240,12 +253,16 @@ export function createApp({
     httpServer,
     io,
     registry,
+    store,
     version,
     close: () =>
       new Promise((resolve) => {
         clearInterval(sweepTimer);
         for (const timer of voteTimers.values()) clearTimeout(timer);
-        io.close(() => resolve());
+        io.close(() => {
+          store?.close();
+          resolve();
+        });
       }),
   };
 }

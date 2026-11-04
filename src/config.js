@@ -43,5 +43,7 @@ export function loadConfig(env = process.env, { readFile = readFileSync } = {}) 
     basePath: normalizeBasePath(env.BASE_PATH ?? ''),
     /** leer = alle Karten-IDs erlaubt (lokal/Tests) */
     cardIds,
+    /** SQLite-Datei; leer = nichts speichern (nur Arbeitsspeicher) */
+    dbPath: (env.DB_PATH ?? '').trim(),
   };
 }

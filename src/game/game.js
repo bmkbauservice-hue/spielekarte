@@ -301,6 +301,18 @@ export class SkatGame {
    * Nie enthalten: fremde Handkarten (Ausnahme: Ouvert), der Skat vor dem Ende,
    * gedrückte Karten für andere als den Alleinspieler.
    */
+  /** Schnappschuss zum Speichern: der komplette Zustand inkl. aller Karten (bleibt auf dem Server!) */
+  toJSON() {
+    const { bidding, ...rest } = this;
+    return { ...structuredClone(rest), bidding: bidding.toJSON() };
+  }
+
+  /** Runde aus einem Schnappschuss wiederherstellen – ohne neu zu mischen. */
+  static fromJSON(data) {
+    const game = Object.create(SkatGame.prototype);
+    return Object.assign(game, structuredClone(data), { bidding: Bidding.fromJSON(data.bidding) });
+  }
+
   viewFor(seat) {
     const isPlayer = Number.isInteger(seat) && seat >= 0 && seat < PLAYERS;
     const isDeclarer = isPlayer && seat === this.declarer;
