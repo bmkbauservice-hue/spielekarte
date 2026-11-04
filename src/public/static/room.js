@@ -124,6 +124,7 @@
     // Lobby
     $('lobby').hidden = !lobby;
     $('btn-start').hidden = !state.canStart;
+    renderHouseRuleSwitches(seated && lobby);
     $('btn-leave-seat').hidden = !lobby || !seated;
     $('btn-leave').hidden = !lobby && seated;
     $('start-hint').textContent = lobby ? startHint(seats, seated, state.canStart) : '';
@@ -170,6 +171,7 @@
     const showLast = game.trick.length === 0 && game.lastTrick !== null;
     const cards = showLast ? game.lastTrick.cards : game.trick;
     $('table').hidden = !inPlay;
+    $('table').classList.toggle('bock', game.bock);
     $('trick-label').textContent = showLast ? `Letzter Stich – ${nameOf(game.lastTrick.winner)} sticht` : 'Aktueller Stich';
     $('trick').classList.toggle('last', showLast);
     $('trick').replaceChildren(...cards.map(({ seat, card }) => trickSlot(seat, card, showLast && seat === game.lastTrick.winner)));
@@ -186,6 +188,7 @@
     status.classList.toggle('my-turn', game.turn === mySeat && game.turn !== null);
 
     renderBidding(game, mySeat);
+    renderHouseRulesInGame(game, mySeat, meDeclarer);
     $('skat-choice').hidden = !(game.phase === 'skat' && meDeclarer && !handMode);
     $('skat-choice-info').textContent = `Gereizt bis ${game.bid}. Mit dem Skat bekommst du 2 Karten dazu und drückst 2 – Hand zählt eine Stufe mehr.`;
     $('discard').hidden = !(game.phase === 'discard' && meDeclarer);
@@ -224,6 +227,9 @@
       case 'skat': return mine ? 'Du hast das Reizen gewonnen!' : `${d} entscheidet: Skat oder Hand …`;
       case 'discard': return mine ? 'Wähle 2 Karten zum Drücken.' : `${d} drückt …`;
       case 'declaring': return mine ? 'Sag dein Spiel an.' : `${d} sagt an …`;
+      case 'gift':
+        if (game.gift.awaitingDeclarer) return mine ? 'Dir wird das Spiel geschenkt!' : `${d} entscheidet über das Geschenk …`;
+        return isMe(game.declarer) ? 'Die Gegenspieler überlegen, ob sie schenken …' : 'Schenken oder spielen?';
       case 'playing':
         if (!mine) return `${nameOf(game.turn)} ist dran …`;
         return game.trick.length === 0 ? 'Du bist dran – spiel aus!' : 'Du bist dran!';
@@ -253,6 +259,8 @@
     if (seat === mySeat) li.append(badge('du', 'badge-me'));
     if (seat === game.declarer) li.append(badge('Alleinspieler', 'badge-solo'));
     else li.append(badge(position, 'badge-dealer'));
+    if (seat === game.kontraBy) li.append(badge('Kontra', 'badge-kontra'));
+    if (seat === game.declarer && game.re) li.append(badge('Re', 'badge-kontra'));
     if (game.phase === 'bidding' && game.bidding.passed.includes(seat)) li.append(badge('passe', 'badge-off'));
     if (person && !person.connected) li.append(badge('getrennt', 'badge-off'));
     li.append(meta);
@@ -402,18 +410,22 @@
     const me = isMe(game.declarer);
     const who = me ? 'Du' : nameOf(game.declarer);
     const verb = r.won ? (me ? 'gewinnst' : 'gewinnt') : (me ? 'verlierst' : 'verliert');
-    $('result-title').textContent = `${who} ${verb} ${r.label}${r.won ? '!' : '.'}`;
+    $('result-title').textContent = `${who} ${verb} ${r.label}${r.gift ? ' – geschenkt' : ''}${r.won ? '!' : '.'}`;
     $('result').classList.toggle('won', r.won);
     $('result').classList.toggle('lost', !r.won);
     $('result-score').textContent = `${signed(r.score)} Punkte`;
 
-    // Rechenweg: "mit 2 + Spiel + Hand = 4 × 10 = 40"
+    // Rechenweg: "mit 2 + Spiel + Hand = 4 × 10 = 40 · × Kontra 2 = 80"
+    const factors = r.factors.map((f) => ` × ${f.label} ${f.factor}`).join('');
+    const after = factors ? `${factors} = ${r.value}` : '';
     $('result-value').textContent = game.game.type === 'null'
-      ? `${r.label} = ${r.value}${r.won ? '' : ` · verloren zählt doppelt: −${2 * r.value}`}`
+      ? `${r.label} = ${r.baseResultValue}${after}${r.won ? '' : ' · verloren zählt doppelt'}`
       : `${r.levels.map((l) => l.label).join(' + ')} = ${r.multiplier} × ${r.base} = ${r.multiplier * r.base}`
-        + (r.overbid ? ` → gewertet mit ${r.value}` : '') + (r.won ? '' : ` · verloren zählt doppelt`);
+        + (r.overbid || r.raisedToBid ? ` → gewertet mit ${r.baseResultValue}` : '') + after + (r.won ? '' : ' · verloren zählt doppelt');
     $('result-reason').textContent = r.won ? `Gereizt bis ${r.bid}.` : `Verloren: ${r.reason}. Gereizt bis ${r.bid}.`;
-    $('result-points').textContent = game.game.type === 'null'
+    $('result-points').textContent = r.gift
+      ? 'Die Gegenspieler haben geschenkt – keine Karte gespielt.'
+      : game.game.type === 'null'
       ? `${r.declarerTricks === 0 ? 'Kein Stich' : `${r.declarerTricks} Stich(e)`} für den Alleinspieler`
       : `Alleinspieler: ${r.declarerPoints} Augen\nGegenspieler: ${r.defenderPoints} Augen`
         + (r.schwarz ? ' · Schwarz!' : r.schneider ? ' · Schneider!' : '');
@@ -439,7 +451,9 @@
     $('scores-head').replaceChildren(cell('th', '#'), cell('th', 'Spiel'), ...state.seats.map((_, i) => cell('th', nameOf(i))));
     $('scores-body').replaceChildren(...rounds.map((row) => {
       const tr = document.createElement('tr');
-      tr.append(cell('td', row.round), cell('td', row.label, 'label'));
+      const marks = [row.bock && 'Bock', row.kontraBy !== null && (row.re ? 'Re' : 'Kontra'), row.gift && 'geschenkt'].filter(Boolean);
+      tr.append(cell('td', row.round), cell('td', [row.label, ...marks].join(' · '), 'label'));
+      if (row.bock) tr.className = 'bock-row';
       for (let seat = 0; seat < 3; seat++) {
         const mine = row.declarer === seat;
         tr.append(cell('td', mine ? signed(row.score) : '', mine ? (row.won ? 'plus' : 'minus') : ''));
@@ -460,7 +474,8 @@
   function renderSummary(seated) {
     const s = state.summary;
     $('summary-meta').textContent =
-      `${s.games} ${s.games === 1 ? 'Spiel' : 'Spiele'}, davon ${s.passed} eingepasst · Dauer ${duration(s.durationMs)}`;
+      `${s.games} ${s.games === 1 ? 'Spiel' : 'Spiele'}, davon ${s.passed} eingepasst`
+      + (state.houseRules.bock ? ` und ${s.bockGames} Bock` : '') + ` · Dauer ${duration(s.durationMs)}`;
     const ranked = [...s.players].sort((a, b) => a.place - b.place || a.seat - b.seat);
     $('summary-players').replaceChildren(...ranked.map((p) => {
       const li = document.createElement('li');
@@ -483,6 +498,9 @@
         `Seeger-Fabian ${signed(p.seegerFabian)}`,
         `${p.declarerGames}× Alleinspieler (${p.won} gewonnen, ${p.lost} verloren)`,
         p.best ? `Bestes Spiel: ${p.best.label} (${p.best.value})` : 'Noch kein Spiel gewonnen',
+        ...(state.houseRules.kontra
+          ? [`Kontra ${p.kontra.said}× (${p.kontra.won} gewonnen)`, `Re ${p.re.said}× (${p.re.won} gewonnen)`, `${p.bockGames} Bock-Spiele`]
+          : []),
       ].join(' · ');
       li.append(head, details);
       return li;
@@ -516,6 +534,50 @@
     };
     update();
     voteTicker = setInterval(update, 1000);
+  }
+
+  // ----- Hausregeln -----
+
+  function renderHouseRuleSwitches(editable) {
+    const rules = state.houseRules;
+    for (const input of document.querySelectorAll('.house-rules input[data-rule]')) {
+      input.checked = rules[input.dataset.rule];
+      input.disabled = !editable || (input.dataset.rule === 'bock' && !rules.kontra);
+    }
+  }
+
+  function renderHouseRulesInGame(game, mySeat, meDeclarer) {
+    // Bock-Anzeige für alle
+    $('bock-line').hidden = state.bockRemaining === 0;
+    $('bock-line').textContent = `Bock: noch ${state.bockRemaining} ${state.bockRemaining === 1 ? 'Spiel' : 'Spiele'}`
+      + (game.bock ? ' · diese Runde zählt doppelt' : '');
+
+    // Kontra / Re – nur, wenn der Server es gerade erlaubt
+    $('btn-kontra').hidden = !game.canKontra;
+    $('btn-re').hidden = !game.canRe;
+    $('kontra-row').hidden = !game.canKontra && !game.canRe;
+
+    // Schenken
+    const gift = game.gift;
+    const show = game.phase === 'gift' && mySeat !== null;
+    $('gift').hidden = !show;
+    if (!show) return;
+    const defender = !meDeclarer;
+    const answered = gift.offers[mySeat] !== null;
+    $('gift-offer').hidden = !(defender && !answered && !gift.awaitingDeclarer);
+    $('gift-answer').hidden = !(meDeclarer && gift.awaitingDeclarer);
+    if (meDeclarer && gift.awaitingDeclarer) {
+      $('gift-title').textContent = 'Beide schenken dir das Spiel';
+      $('gift-info').textContent = 'Annehmen: sofort gewonnen mit dem einfachen Spielwert. Ablehnen: normal spielen – dann ist Schneider Pflicht.';
+    } else if (defender) {
+      $('gift-title').textContent = 'Schenken?';
+      $('gift-info').textContent = answered
+        ? 'Du schenkst. Warte auf den anderen Gegenspieler …'
+        : `Nur wenn beide schenken, wird ${nameOf(game.declarer)} gefragt.`;
+    } else {
+      $('gift-title').textContent = 'Schenken?';
+      $('gift-info').textContent = 'Die Gegenspieler entscheiden, ob sie dir das Spiel schenken.';
+    }
   }
 
   function startHint(seats, seated, canStart) {
@@ -598,6 +660,21 @@
   });
   $('btn-start').addEventListener('click', () => act('game:start'));
   $('btn-leave-seat').addEventListener('click', () => act('seat:leave'));
+
+  // Hausregeln
+  document.querySelector('.house-rules').addEventListener('change', () => {
+    const rules = {};
+    for (const input of document.querySelectorAll('.house-rules input[data-rule]')) rules[input.dataset.rule] = input.checked;
+    act('rules:set', rules);
+  });
+  $('btn-kontra').addEventListener('click', () => act('game:kontra'));
+  $('btn-re').addEventListener('click', () => act('game:re'));
+  $('btn-gift-yes').addEventListener('click', () => act('game:gift', { yes: true }));
+  $('btn-gift-no').addEventListener('click', () => act('game:gift', { yes: false }));
+  $('btn-gift-accept').addEventListener('click', () => act('game:gift-answer', { accept: true }));
+  $('btn-gift-refuse').addEventListener('click', () => {
+    if (confirm('Geschenk ablehnen? Dann musst du Schneider machen (mindestens 90 Augen).')) act('game:gift-answer', { accept: false });
+  });
 
   // Reizen
   $('btn-bid-go').addEventListener('click', (e) => act('game:bid', { action: e.currentTarget.dataset.action }));

@@ -202,6 +202,11 @@ export function createApp({
       room.declare(token, { type, trump, schneiderAnnounced, schwarzAnnounced, ouvert }));
     action('game:play', (room, token, { card }) => room.playCard(token, card));
     action('game:next', (room, token) => room.nextRound(token));
+    action('rules:set', (room, token, { kontra, bock, schenken }) => room.setHouseRules(token, { kontra, bock, schenken }));
+    action('game:kontra', (room, token) => room.sayKontra(token));
+    action('game:re', (room, token) => room.sayRe(token));
+    action('game:gift', (room, token, { yes }) => room.offerGift(token, yes === true));
+    action('game:gift-answer', (room, token, { accept }) => room.answerGift(token, accept === true));
     action('vote:request', (room, token, { kind }) => room.requestVote(token, kind));
     action('vote:cast', (room, token, { agree }) => room.castVote(token, agree === true));
     action('evening:new', (room, token) => room.start(token));
