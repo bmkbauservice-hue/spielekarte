@@ -1,37 +1,67 @@
 // Verdrahtet Express (HTTP-Seiten) und Socket.IO (Echtzeit) mit der Raum-Logik.
 
 import { createServer } from 'node:http';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import express from 'express';
 import { Server } from 'socket.io';
 import { RoomRegistry } from './rooms/registry.js';
 import { RoomError, normalizeRoomId } from './rooms/room.js';
+import { GameError } from './game/game.js';
+import { createRateLimiter } from './rate-limit.js';
 
 const publicDir = fileURLToPath(new URL('./public/', import.meta.url));
+const staticDir = join(publicDir, 'static');
 
 /**
- * @param {{ basePath?: string, sweepIntervalMs?: number, registry?: RoomRegistry }} [options]
+ * @param {object} [options]
+ * @param {string} [options.basePath]          URL-Prefix, z. B. "/spiel"
+ * @param {Iterable<string>} [options.cardIds] erlaubte Karten-IDs; leer = alle erlaubt
+ * @param {{ limit: number, windowMs: number }} [options.joinLimit]  Beitritte pro Verbindung
+ * @param {{ limit: number, windowMs: number }} [options.eventLimit] Aktionen pro Verbindung insgesamt
+ * @param {number} [options.sweepIntervalMs]
+ * @param {RoomRegistry} [options.registry]
  */
-export function createApp({ basePath = '', sweepIntervalMs = 60_000, registry = new RoomRegistry() } = {}) {
+export function createApp({
+  basePath = '',
+  cardIds = [],
+  joinLimit = { limit: 10, windowMs: 60_000 },
+  eventLimit = { limit: 120, windowMs: 60_000 },
+  sweepIntervalMs = 60_000,
+  registry = new RoomRegistry(),
+} = {}) {
+  const allowedCards = new Set(cardIds);
+  const isCardAllowed = (id) => allowedCards.size === 0 || allowedCards.has(id);
+
   const app = express();
   app.disable('x-powered-by');
   app.use(securityHeaders);
 
-  // HTML-Vorlagen einmal laden; Platzhalter {{BASE}} und {{ROOM_ID}} werden ersetzt.
-  const template = (file) => readFileSync(join(publicDir, file), 'utf8');
-  const landingHtml = template('index.html').replaceAll('{{BASE}}', basePath);
-  const roomHtml = template('room.html').replaceAll('{{BASE}}', basePath);
-  const notFoundHtml = template('404.html').replaceAll('{{BASE}}', basePath);
+  // HTML-Vorlagen einmal laden. Platzhalter: {{BASE}}, {{V}} (Cache-Busting), {{ROOM_ID}}, {{TITLE}}, {{TEXT}}
+  const version = staticVersion();
+  const template = (file) =>
+    readFileSync(join(publicDir, file), 'utf8').replaceAll('{{BASE}}', basePath).replaceAll('{{V}}', version);
+  const landingHtml = template('index.html');
+  const roomHtml = template('room.html');
+  const errorTemplate = template('404.html');
+  const errorPage = (title, text) => errorTemplate.replaceAll('{{TITLE}}', title).replaceAll('{{TEXT}}', text);
+  const notFoundHtml = errorPage('Seite nicht gefunden', 'Karten-Codes bestehen aus 3–16 Buchstaben und Ziffern.');
+  const unknownCardHtml = errorPage(
+    'Diese Karte ist nicht freigeschaltet',
+    'Prüfe den Code auf deiner Karte – oder frag den, der dir die Karte gegeben hat.',
+  );
 
   const router = express.Router();
   router.get('/health', (_req, res) => res.json({ ok: true, rooms: registry.rooms.size }));
-  router.use('/static', express.static(join(publicDir, 'static'), { maxAge: '1h' }));
+  // Dateien haben ?v=<hash> in der URL → dürfen lange gecacht werden
+  router.use('/static', express.static(staticDir, { maxAge: '7d' }));
   router.get('/', (_req, res) => res.type('html').send(landingHtml));
   router.get('/k/:id', (req, res) => {
     const id = normalizeRoomId(req.params.id);
     if (!id) return res.status(404).type('html').send(notFoundHtml);
+    if (!isCardAllowed(id)) return res.status(404).type('html').send(unknownCardHtml);
     // Eine kanonische URL pro Karte: /k/muju01 → /k/MUJU01
     if (id !== req.params.id) return res.redirect(301, `${basePath}/k/${id}`);
     // id ist geprüft (nur A–Z, 0–9), daher sicher ins HTML einsetzbar
@@ -60,15 +90,20 @@ export function createApp({ basePath = '', sweepIntervalMs = 60_000, registry = 
     }
   }
 
-  /** Wrapper: prüft Eingaben, fängt RoomError ab und antwortet per Ack. */
+  /** Wrapper: Rate-Limit, Eingaben prüfen, Fehler abfangen, per Ack antworten. */
   function handle(socket, event, fn) {
     socket.on(event, (payload, ack) => {
       const reply = typeof ack === 'function' ? ack : () => {};
       const data = payload && typeof payload === 'object' ? payload : {};
       try {
+        if (!socket.data.limits.events.allow()) {
+          throw new RoomError('ZU_VIELE', 'Zu viele Anfragen. Bitte kurz warten.');
+        }
         reply({ ok: true, ...(fn(data) ?? {}) });
       } catch (err) {
-        if (err instanceof RoomError) return reply({ ok: false, code: err.code, message: err.message });
+        if (err instanceof RoomError || err instanceof GameError) {
+          return reply({ ok: false, code: err.code, message: err.message });
+        }
         console.error(`[${event}]`, err);
         reply({ ok: false, code: 'SERVERFEHLER', message: 'Unerwarteter Fehler auf dem Server.' });
       }
@@ -99,9 +134,23 @@ export function createApp({ basePath = '', sweepIntervalMs = 60_000, registry = 
   }
 
   io.on('connection', (socket) => {
+    socket.data.limits = {
+      joins: createRateLimiter(joinLimit),
+      events: createRateLimiter(eventLimit),
+    };
+
     handle(socket, 'room:join', ({ roomId, name, token }) => {
+      if (!socket.data.limits.joins.allow()) {
+        throw new RoomError('ZU_VIELE', 'Zu viele Beitrittsversuche. Bitte eine Minute warten.');
+      }
       const id = normalizeRoomId(roomId);
       if (!id) throw new RoomError('RAUM_UNGUELTIG', 'Diese Karten-ID gibt es nicht.');
+      if (!isCardAllowed(id)) throw new RoomError('KARTE_UNBEKANNT', 'Diese Karte ist nicht freigeschaltet.');
+      // Eine Verbindung = eine Person. Wer schon im Raum ist, kann sich nicht als weitere Person anmelden.
+      if (socket.data.roomId === id && token !== socket.data.token) {
+        throw new RoomError('SCHON_IM_RAUM', 'Du bist schon in diesem Raum.');
+      }
+
       const room = registry.getOrCreate(id);
       const { player } = room.join({ name, token });
 
@@ -144,6 +193,9 @@ export function createApp({ basePath = '', sweepIntervalMs = 60_000, registry = 
     action('seat:leave', (room, token) => room.leaveSeat(token));
     action('game:start', (room, token) => room.start(token));
     action('game:stop', (room, token) => room.stop(token));
+    action('game:declare', (room, token, { type, trump }) => room.declare(token, { type, trump }));
+    action('game:play', (room, token, { card }) => room.playCard(token, card));
+    action('game:next', (room, token) => room.nextRound(token));
 
     socket.on('disconnect', () => detach(socket));
   });
@@ -164,6 +216,13 @@ export function createApp({ basePath = '', sweepIntervalMs = 60_000, registry = 
         io.close(() => resolve());
       }),
   };
+}
+
+/** Kurzer Hash über alle statischen Dateien → ändert sich bei jedem Deploy mit geänderten Dateien. */
+function staticVersion() {
+  const hash = createHash('sha256');
+  for (const file of readdirSync(staticDir).sort()) hash.update(file).update(readFileSync(join(staticDir, file)));
+  return hash.digest('hex').slice(0, 10);
 }
 
 /** Einfache Sicherheits-Header. CSP: nur eigene Skripte/Styles, keine Inline-Skripte. */

@@ -4,7 +4,13 @@ import { loadConfig } from './config.js';
 import { createApp } from './app.js';
 
 const config = loadConfig();
-const { httpServer, close } = createApp({ basePath: config.basePath });
+const { httpServer, close } = createApp({ basePath: config.basePath, cardIds: config.cardIds });
+
+if (config.cardIds.size === 0) {
+  console.warn('Hinweis: CARD_IDS ist leer – ALLE Karten-IDs sind erlaubt. In Produktion CARD_IDS oder CARD_IDS_FILE setzen.');
+} else {
+  console.log(`${config.cardIds.size} Karten-ID(s) freigeschaltet.`);
+}
 
 httpServer.listen(config.port, config.host, () => {
   console.log(`Spielekarte läuft auf http://localhost:${config.port}${config.basePath}/`);
