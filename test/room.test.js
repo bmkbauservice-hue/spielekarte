@@ -2,6 +2,8 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { Room, RoomError, normalizeRoomId, cleanName, MAX_SPECTATORS } from '../src/rooms/room.js';
 import { RoomRegistry } from '../src/rooms/registry.js';
+import { SkatGame, GameError } from '../src/game/game.js';
+import { createDeck } from '../src/game/cards.js';
 
 /** Steuerbare Uhr für Tests */
 function fakeClock(start = 1_000_000) {
@@ -213,5 +215,84 @@ describe('Aufräumen', () => {
     reg.getOrCreate('AAA');
     reg.getOrCreate('BBB');
     assert.throws(() => reg.getOrCreate('CCC'), (e) => e.code === 'SERVER_VOLL');
+  });
+});
+
+describe('Room – Skat-Runde', () => {
+  // Unsortiertes Standardblatt: Platz 1 (Vorhand bei Geber 3) bekommt die ersten 10 Karten
+  const fixed = { createGame: (opts) => new SkatGame({ ...opts, deck: createDeck() }) };
+  const gameThrows = (fn, code) => assert.throws(fn, (e) => e instanceof GameError && e.code === code);
+
+  test('Start gibt Karten; erste Runde: Platz 3 gibt, Platz 1 ist Alleinspieler', () => {
+    const { room, players } = roomWith(3, fixed);
+    room.start(players[0].token);
+    const view = room.stateFor(players[0].token);
+    assert.equal(view.round, 1);
+    assert.equal(view.game.phase, 'declaring');
+    assert.equal(view.game.dealer, 2);
+    assert.equal(view.game.declarer, 0);
+    assert.equal(view.game.hand.length, 10);
+  });
+
+  test('jeder Spieler sieht nur seine eigenen Karten, Zuschauer keine', () => {
+    const { room, players } = roomWith(4);
+    room.start(players[0].token);
+    const hands = room.game.hands;
+    for (const seat of [0, 1, 2]) {
+      const json = JSON.stringify(room.stateFor(players[seat].token));
+      const foreign = [...hands.filter((_, i) => i !== seat).flat(), ...room.game.skat];
+      for (const card of foreign) assert.equal(json.includes(`"${card}"`), false, `Platz ${seat} sieht ${card}`);
+    }
+    const spectator = room.stateFor(players[3].token);
+    assert.equal(spectator.game.hand, null);
+    for (const card of createDeck()) assert.equal(JSON.stringify(spectator).includes(`"${card}"`), false);
+  });
+
+  test('ansagen, spielen, neue Runde – mit den richtigen Berechtigungen', () => {
+    const { room, players } = roomWith(4, fixed);
+    const [a, b, c, watcher] = players.map((p) => p.token);
+    throwsCode(() => room.declare(a, { type: 'grand' }), 'KEIN_SPIEL');
+    room.start(a);
+
+    throwsCode(() => room.declare(watcher, { type: 'grand' }), 'NUR_SPIELER');
+    gameThrows(() => room.declare(b, { type: 'grand' }), 'NICHT_ALLEINSPIELER');
+    room.declare(a, { type: 'grand' });
+    throwsCode(() => room.nextRound(a), 'RUNDE_LAEUFT');
+
+    // Runde mit jeweils der ersten erlaubten Karte zu Ende spielen
+    const bySeat = [a, b, c];
+    while (room.game.phase === 'playing') {
+      const seat = room.game.turn;
+      room.playCard(bySeat[seat], room.stateFor(bySeat[seat]).game.legal[0]);
+    }
+    const result = room.stateFor(watcher).game.result;
+    assert.equal(result.declarerPoints + result.defenderPoints, 120);
+
+    throwsCode(() => room.nextRound(watcher), 'NUR_SPIELER');
+    room.nextRound(c);
+    assert.equal(room.round, 2);
+    assert.equal(room.game.dealer, 0, 'Geber rückt weiter');
+    assert.equal(room.game.declarer, 1, 'Alleinspieler wechselt reihum');
+  });
+
+  test('Alleinspieler rotiert über drei Runden durch alle Plätze', () => {
+    const { room, players } = roomWith(3);
+    room.start(players[0].token);
+    const declarers = [];
+    for (let r = 0; r < 3; r++) {
+      declarers.push(room.game.declarer);
+      room.game.declare(room.game.declarer, { type: 'grand' });
+      while (room.game.phase === 'playing') room.game.play(room.game.turn, room.game.legalFor(room.game.turn)[0]);
+      room.nextRound(players[0].token);
+    }
+    assert.deepEqual(declarers, [0, 1, 2]);
+  });
+
+  test('Spiel beenden verwirft die Runde', () => {
+    const { room, players } = roomWith(3);
+    room.start(players[0].token);
+    room.stop(players[1].token);
+    assert.equal(room.game, null);
+    assert.equal(room.stateFor(players[0].token).game, null);
   });
 });
