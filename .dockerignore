@@ -8,3 +8,7 @@ backup-*
 *.md
 Dockerfile
 docker-compose.yml
+data
+*.db
+*.db-wal
+*.db-shm

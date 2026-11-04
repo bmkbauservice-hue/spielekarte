@@ -11,6 +11,8 @@ export const MAX_SPECTATORS = 20;
 export const NAME_MAX_LENGTH = 20;
 export const VOTE_MS = 60_000; // Abstimmungen (Abbrechen, Abend beenden) laufen 60 s
 export const VOTE_KINDS = ['abort', 'end'];
+/** Format der gespeicherten Schnappschüsse. Bei inkompatiblen Änderungen hochzählen. */
+export const SNAPSHOT_VERSION = 1;
 export const ABSENT_MS = 120_000; // wer 2 min getrennt ist, blockiert den Abbruch nicht
 
 /** Fehler mit maschinenlesbarem Code (für den Client) und deutschem Text (für Menschen). */
@@ -423,6 +425,57 @@ export class Room {
    * Was ein bestimmter Spieler sehen darf. Enthält NIE Tokens anderer Spieler
    * und NIE fremde Handkarten: Das Spiel liefert die Sicht nur für den eigenen Platz.
    */
+  /**
+   * Schnappschuss zum Speichern (SQLite). Enthält Tokens und alle Karten – darf NIE an Clients gehen.
+   * Nicht gespeichert: Verbindungsstatus und laufende Abstimmungen (die enden mit einem Neustart).
+   */
+  toJSON() {
+    return {
+      v: SNAPSHOT_VERSION,
+      id: this.id,
+      status: this.status,
+      round: this.round,
+      dealer: this.dealer,
+      players: [...this.players.values()].map(({ token, id, name, seat, lastSeen }) => ({ token, id, name, seat, lastSeen })),
+      seats: [...this.seats],
+      houseRules: { ...this.houseRules },
+      bockRemaining: this.bockRemaining,
+      scores: structuredClone(this.scores),
+      eveningStartedAt: this.eveningStartedAt,
+      summary: structuredClone(this.summary),
+      game: this.game ? this.game.toJSON() : null,
+      gameRecorded: this.game !== null && this.recordedGame === this.game,
+      lastActivity: this.lastActivity,
+    };
+  }
+
+  /** Raum aus einem Schnappschuss wiederherstellen. Alle gelten erst einmal als getrennt. */
+  static fromJSON(data, options = {}) {
+    if (data?.v !== SNAPSHOT_VERSION) throw new Error(`Unbekannte Schnappschuss-Version: ${data?.v}`);
+    const room = new Room(data.id, options);
+    const now = room.now();
+    room.status = data.status;
+    room.round = data.round;
+    room.dealer = data.dealer;
+    for (const p of data.players) {
+      // lastSeen = jetzt: Nach einem Neustart beginnt die Gnadenfrist fürs Wiederverbinden neu
+      room.players.set(p.token, { ...p, connected: false, lastSeen: now });
+    }
+    room.seats = [...data.seats];
+    if (room.seats.length !== SEAT_COUNT || room.seats.some((t) => t !== null && !room.players.has(t))) {
+      throw new Error(`Schnappschuss von ${data.id} ist inkonsistent (Plätze/Spieler).`);
+    }
+    room.houseRules = normalizeHouseRules(data.houseRules);
+    room.bockRemaining = data.bockRemaining;
+    room.scores = structuredClone(data.scores);
+    room.eveningStartedAt = data.eveningStartedAt;
+    room.summary = structuredClone(data.summary);
+    room.game = data.game ? SkatGame.fromJSON(data.game) : null;
+    room.recordedGame = data.gameRecorded ? room.game : null;
+    room.lastActivity = data.lastActivity;
+    return room;
+  }
+
   stateFor(token) {
     const me = this.players.get(token) ?? null;
     const pub = (p) => ({ id: p.id, name: p.name, connected: p.connected });

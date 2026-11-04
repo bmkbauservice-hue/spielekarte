@@ -23,8 +23,8 @@ mit den anderen Skat. Nur zum Spaß – kein Geld, kein Einsatz.
 - Spieler-Identität: geheimes Token vom Server, im Browser im `localStorage`
   (Schlüssel pro Raum). Neuladen = gleicher Platz. Tokens werden nie an andere
   Spieler geschickt – öffentlich ist nur eine kurze `id`.
-- Räume im Arbeitsspeicher (keine Datenbank). Ein Raum pro Karten-ID,
-  3 Spielplätze + Zuschauer.
+- Räume im Arbeitsspeicher, zusätzlich als Schnappschuss in SQLite (`DB_PATH`, eingebautes `node:sqlite`),
+  damit Abende einen Neustart/Deploy überleben. Ein Raum pro Karten-ID, 3 Spielplätze + Zuschauer.
 - Basis-Pfad konfigurierbar über `BASE_PATH` (Produktion `/spiel`, lokal leer).
 - Docker: Container `spielekarte`, Port 3000, externes Docker-Netz `web`,
   davor Caddy unter `https://mkdirdesign.com/spiel`.
@@ -56,7 +56,9 @@ src/
   game/errors.js     GameError
   game/game.js       SkatGame: eine Runde (reizen → Skat/Hand → drücken → ansagen → Stiche), viewFor(seat)
   rooms/room.js      Reine Raum-Logik (Plätze, Tokens, Start, Runden) – ohne Netzwerk, gut testbar
-  rooms/registry.js  Verwaltet alle Räume (anlegen, aufräumen)
+  rooms/registry.js  Verwaltet alle Räume (anlegen, aufräumen, laden/speichern)
+  storage/sqlite-store.js  SQLite: eine Zeile pro Raum (JSON-Schnappschuss), Migrationen, Sicherung
+scripts/backup.js    Datensicherung (VACUUM INTO)
   public/            Browser-Dateien (HTML, CSS, JS)
 test/                Tests mit node:test
 ```
@@ -79,10 +81,9 @@ Immer nur eine Etappe gleichzeitig; jede einzeln testbar.
 
 ## Stand
 
-- Etappe 1 + 2: live unter https://mkdirdesign.com/spiel (Auto-Deploy bei Merge auf `main`, `CARD_IDS` gesetzt).
-- Etappe 3: PR #3 offen (Branch `etappe-3-reizen`).
-- Etappe 3b: PR offen (Branch `etappe-3b-hausregeln`, baut auf Etappe 3 auf → erst #3 mergen).
-- Nächster Schritt: Etappe 3c – Speichern (SQLite im Docker-Volume).
+- Etappe 1–3 live. Etappe 3b liegt als PR #5 bereit (#4 landete versehentlich im Branch `etappe-3-reizen`).
+- Etappe 3c: PR offen (Branch `etappe-3c-speichern`, gegen `main`).
+- Nächster Schritt: Etappe 4 – Design + Animationen (Vorgaben im Prompt vom 04.11., Wunschliste `docs/etappe-4-design.md`).
 
 ## Entscheidungen (vom Inhaber bestätigt)
 
@@ -105,3 +106,7 @@ Immer nur eine Etappe gleichzeitig; jede einzeln testbar.
   `evening:new`, `evening:lobby`, `rules:set {kontra, bock, schenken}`, `game:kontra`, `game:re`,
   `game:gift {yes}`, `game:gift-answer {accept}`.
 - Eigenschaft und Methode nie gleich benennen (`bid()` vs. `bidValue`).
+- PRs immer gegen `main` (nie gegen einen anderen Feature-Branch stapeln).
+- Neuer Zustand in Room/SkatGame/Bidding → muss in `toJSON`/`fromJSON` (Room listet Felder explizit!).
+  Inkompatible Änderung am Format → `SNAPSHOT_VERSION` hochzählen (alte Räume werden dann übersprungen).
+- Jede Zustandsänderung in `app.js` über `publish(room)` (speichern + senden), nicht nur `broadcast`.
