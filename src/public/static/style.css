@@ -149,18 +149,7 @@ input:focus { outline: 2px solid var(--neon); outline-offset: 1px; }
 .badge-off { background: rgba(255, 107, 139, 0.15); color: var(--danger); }
 .seat .badge:first-of-type { margin-left: auto; }
 
-/* ---------- Banner + Toast ---------- */
-.banner {
-  display: grid;
-  gap: 4px;
-  padding: 14px 16px;
-  border-radius: var(--radius);
-  border: 1px solid var(--neon);
-  background: rgba(57, 255, 176, 0.08);
-  box-shadow: 0 0 24px rgba(57, 255, 176, 0.15);
-}
-.banner strong { color: var(--neon); }
-
+/* ---------- Toast ---------- */
 .toast {
   position: fixed;
   left: 50%;
@@ -178,6 +167,101 @@ input:focus { outline: 2px solid var(--neon); outline-offset: 1px; }
   transition: opacity 0.2s ease, transform 0.2s ease;
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* ---------- Spiel (Etappe 2: schlicht & funktional, Design folgt in Etappe 4) ---------- */
+.game { display: grid; gap: 12px; }
+.game-info { margin: 0; text-align: center; color: var(--gold-light); font-weight: 700; }
+
+.game-players { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.gp {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.gp.turn { border-color: var(--neon); box-shadow: 0 0 12px rgba(57, 255, 176, 0.25); }
+.gp.me .gp-name { color: var(--neon); }
+.gp-name { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40%; }
+.gp-meta { margin-left: auto; font-size: 0.8rem; color: var(--muted); }
+.badge-solo { background: var(--gold); color: #1d1600; font-weight: 700; }
+.badge-dealer { border: 1px solid var(--line); color: var(--muted); }
+
+.table {
+  min-height: 148px;
+  padding: 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: radial-gradient(circle at 50% 40%, rgba(10, 90, 67, 0.6), rgba(0, 0, 0, 0.25));
+}
+.table-label { margin: 0 0 8px; text-align: center; font-size: 0.8rem; color: var(--muted); min-height: 1.2em; }
+.trick { display: flex; justify-content: center; gap: 10px; }
+.trick.last { opacity: 0.75; }
+.slot { display: grid; justify-items: center; gap: 4px; width: 76px; }
+.slot .card { width: 72px; }
+.slot.winner .card { box-shadow: 0 0 0 2px var(--gold), 0 0 14px rgba(212, 175, 55, 0.5); }
+.slot-name { font-size: 0.75rem; color: var(--muted); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.game-status { margin: 0; text-align: center; min-height: 1.4em; color: var(--muted); }
+.game-status.my-turn { color: var(--neon); font-weight: 700; }
+
+/* Karten: einfache Platzhalter mit großen Eck-Indizes, Vier-Farben-Blatt */
+.s-kreuz { --card-color: #151515; }
+.s-pik { --card-color: #157a39; }
+.s-herz { --card-color: #d0102c; }
+.s-karo { --card-color: #e07800; }
+
+.card {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 5 / 7;
+  padding: 0;
+  font: inherit;
+  color: var(--card-color);
+  background: #fbfaf5;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.35);
+  transition: transform 0.1s ease, opacity 0.15s ease;
+}
+.card .idx { position: absolute; display: flex; flex-direction: column; align-items: center; line-height: 1; }
+.card .idx-tl { top: 4px; left: 5px; }
+.card .idx-br { bottom: 4px; right: 5px; transform: rotate(180deg); }
+.card .idx b { font-size: 1.25rem; font-weight: 800; }
+.card .idx i { font-style: normal; font-size: 1rem; }
+.card .pip { position: absolute; inset: 0; display: grid; place-items: center; font-size: 2rem; }
+
+.hand { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+.hand .card.playable { cursor: pointer; transform: translateY(-4px); box-shadow: 0 0 0 2px var(--neon), 0 4px 10px rgba(0, 0, 0, 0.4); }
+.hand .card.playable:active { transform: translateY(-1px) scale(0.97); }
+.hand .card.blocked { opacity: 0.35; }
+
+.mini-cards { display: inline-flex; gap: 6px; vertical-align: middle; }
+.mini-cards .card { width: 44px; }
+.mini-cards .idx b { font-size: 0.85rem; }
+.mini-cards .idx i { font-size: 0.7rem; }
+.mini-cards .pip { font-size: 1.1rem; }
+
+/* Ansage */
+.declare-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.btn-suit { background: #fbfaf5; color: var(--card-color); font-size: 1.05rem; }
+.declare-buttons .grand { grid-column: 1 / -1; }
+.declare-buttons small { font-weight: 400; margin-left: 6px; opacity: 0.8; }
+
+/* Ergebnis */
+.result { display: grid; gap: 10px; text-align: center; }
+.result h2 { font-size: 1.3rem; text-transform: none; letter-spacing: 0; margin: 0; }
+.result.won { border-color: var(--neon); }
+.result.won h2 { color: var(--neon); }
+.result.lost { border-color: var(--danger); }
+.result.lost h2 { color: var(--danger); }
+.result p { margin: 0; }
+.result-points { font-weight: 700; white-space: pre-line; }
+.skat-line { display: flex; align-items: center; justify-content: center; gap: 8px; }
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }

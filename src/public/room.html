@@ -35,21 +35,53 @@
     </section>
 
     <section id="view-room" hidden>
-      <div id="banner-running" class="banner" hidden>
-        <strong>Spiel läuft!</strong>
-        <span>Das Skat-Spiel selbst kommt in Etappe 2.</span>
-      </div>
-
-      <div class="panel">
+      <!-- Lobby: Plätze + Start -->
+      <div id="lobby" class="panel">
         <h2>Am Tisch</h2>
         <ol id="seats" class="seats"></ol>
 
         <div class="actions">
           <button id="btn-start" class="btn btn-neon" hidden>Spiel starten</button>
           <p id="start-hint" class="muted hint"></p>
-          <button id="btn-stop" class="btn btn-ghost" hidden>Spiel beenden</button>
           <button id="btn-leave-seat" class="btn btn-ghost" hidden>Platz freigeben</button>
         </div>
+      </div>
+
+      <!-- Laufendes Spiel -->
+      <div id="game" class="game" hidden>
+        <p id="game-info" class="game-info"></p>
+        <ol id="game-players" class="game-players"></ol>
+
+        <div id="table" class="table">
+          <p id="trick-label" class="table-label"></p>
+          <div id="trick" class="trick"></div>
+        </div>
+
+        <p id="game-status" class="game-status" role="status"></p>
+
+        <div id="declare" class="panel declare" hidden>
+          <h2>Welches Spiel spielst du?</h2>
+          <div class="declare-buttons">
+            <button class="btn btn-suit s-kreuz" data-type="suit" data-trump="kreuz">♣ Kreuz</button>
+            <button class="btn btn-suit s-pik" data-type="suit" data-trump="pik">♠ Pik</button>
+            <button class="btn btn-suit s-herz" data-type="suit" data-trump="herz">♥ Herz</button>
+            <button class="btn btn-suit s-karo" data-type="suit" data-trump="karo">♦ Karo</button>
+            <button class="btn btn-gold grand" data-type="grand">Grand <small>(nur Buben Trumpf)</small></button>
+          </div>
+        </div>
+
+        <div id="result" class="panel result" hidden>
+          <h2 id="result-title"></h2>
+          <p id="result-points" class="result-points"></p>
+          <p id="result-extra" class="muted"></p>
+          <div class="skat-line"><span class="muted">Im Skat:</span> <span id="result-skat" class="mini-cards"></span></div>
+          <button id="btn-next" class="btn btn-neon">Neue Runde</button>
+          <p id="result-wait" class="muted hint">Ein Spieler am Tisch startet die nächste Runde.</p>
+        </div>
+
+        <div id="hand" class="hand" aria-label="Deine Karten"></div>
+
+        <button id="btn-stop" class="btn btn-link" hidden>Spiel beenden</button>
       </div>
 
       <div class="panel">

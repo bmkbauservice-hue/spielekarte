@@ -181,3 +181,65 @@ describe('Spielraum per Socket.IO', () => {
     assert.equal((await request(s, 'seat:take', { seat: 'abc' })).code, 'NICHT_IM_RAUM');
   });
 });
+
+describe('Skat-Runde per Socket.IO', () => {
+  /** wartet, bis eine Bedingung erfüllt ist (Zustände kommen asynchron über drei Verbindungen) */
+  async function waitUntil(predicate, ms = 2000) {
+    const end = Date.now() + ms;
+    while (!predicate()) {
+      if (Date.now() > end) throw new Error('Bedingung nicht erfüllt');
+      await new Promise((r) => setTimeout(r, 5));
+    }
+  }
+  const cardsLeft = (s) => s.game.handCounts.reduce((a, b) => a + b, 0);
+
+  test('komplette Runde: nur eigene Karten, nur erlaubte Züge, Ergebnis, neue Runde', async () => {
+    const phones = [await phone(), await phone(), await phone()];
+    const latest = [null, null, null];
+    phones.forEach((p, i) => p.on('room:state', (s) => { latest[i] = s; }));
+    for (const [i, name] of ['Ali', 'Bea', 'Cai'].entries()) {
+      assert.equal((await request(phones[i], 'room:join', { roomId: 'SPIEL1', name })).ok, true);
+    }
+    await request(phones[0], 'game:start');
+    await waitUntil(() => latest.every((s) => s?.game?.phase === 'declaring'));
+
+    // Auf der Leitung: jedes Handy hat 10 eigene Karten und keine fremde
+    const hands = latest.map((s) => s.game.hand);
+    assert.deepEqual(hands.map((h) => h.length), [10, 10, 10]);
+    assert.equal(new Set(hands.flat()).size, 30);
+    for (const i of [0, 1, 2]) {
+      const json = JSON.stringify(latest[i]);
+      for (const card of hands.filter((_, j) => j !== i).flat()) assert.equal(json.includes(`"${card}"`), false);
+      assert.equal(latest[i].game.skat, null);
+    }
+
+    const declarer = latest[0].game.declarer;
+    assert.equal(declarer, 0, 'erste Runde: Platz 1 ist Alleinspieler');
+    assert.equal((await request(phones[1], 'game:declare', { type: 'grand' })).code, 'NICHT_ALLEINSPIELER');
+    assert.equal((await request(phones[0], 'game:declare', { type: 'suit', trump: 'pik' })).ok, true);
+
+    let played = 0;
+    for (;;) {
+      await waitUntil(() => latest.every((s) => cardsLeft(s) === 30 - played));
+      const g = latest[0].game;
+      if (g.phase === 'finished') break;
+      const turn = g.turn;
+      const other = (turn + 1) % 3;
+      assert.equal((await request(phones[other], 'game:play', { card: latest[other].game.hand[0] })).code, 'NICHT_DRAN');
+      const mine = latest[turn].game;
+      const illegal = mine.hand.find((c) => !mine.legal.includes(c));
+      if (illegal) assert.equal((await request(phones[turn], 'game:play', { card: illegal })).code, 'BEDIENPFLICHT');
+      assert.equal((await request(phones[turn], 'game:play', { card: mine.legal[0] })).ok, true);
+      played++;
+    }
+
+    const results = latest.map((s) => s.game.result);
+    assert.equal(results[0].declarerPoints + results[0].defenderPoints, 120);
+    assert.deepEqual(results[1], results[0]);
+    assert.equal(latest[2].game.skat.length, 2, 'Skat wird am Ende aufgedeckt');
+
+    assert.equal((await request(phones[2], 'game:next')).ok, true);
+    await waitUntil(() => latest.every((s) => s.round === 2 && s.game.phase === 'declaring'));
+    assert.equal(latest[0].game.declarer, 1, 'Alleinspieler wechselt reihum');
+  });
+});
