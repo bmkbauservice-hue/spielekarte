@@ -7,6 +7,8 @@ import { SkatGame } from '../game/game.js';
 export const SEAT_COUNT = 3;
 export const MAX_SPECTATORS = 20;
 export const NAME_MAX_LENGTH = 20;
+export const ABORT_VOTE_MS = 60_000; // Abbruch-Abstimmung läuft 60 s
+export const ABSENT_MS = 120_000; // wer 2 min getrennt ist, blockiert den Abbruch nicht
 
 /** Fehler mit maschinenlesbarem Code (für den Client) und deutschem Text (für Menschen). */
 export class RoomError extends Error {
@@ -42,13 +44,29 @@ const newToken = () => randomBytes(24).toString('base64url'); // geheim, ~190 Bi
 export class Room {
   /**
    * @param {string} id  bereits normalisierte Karten-ID
-   * @param {{ now?: () => number, createGame?: (opts: { dealer: number }) => SkatGame }} [options]
-   *   `now` und `createGame` sind austauschbar, damit Tests Zeit und Kartenverteilung steuern können
+   * @param {object} [options]  alles austauschbar, damit Tests Zeit und Kartenverteilung steuern können
+   * @param {() => number} [options.now]
+   * @param {(opts: { dealer: number }) => SkatGame} [options.createGame]
+   * @param {number} [options.abortVoteMs]  so lange läuft eine Abbruch-Abstimmung
+   * @param {number} [options.absentMs]     wer so lange getrennt ist, blockiert den Abbruch nicht
    */
-  constructor(id, { now = Date.now, createGame = (opts) => new SkatGame(opts) } = {}) {
+  constructor(id, {
+    now = Date.now,
+    createGame = (opts) => new SkatGame(opts),
+    abortVoteMs = ABORT_VOTE_MS,
+    absentMs = ABSENT_MS,
+  } = {}) {
     this.id = id;
     this.now = now;
     this.createGame = createGame;
+    this.abortVoteMs = abortVoteMs;
+    this.absentMs = absentMs;
+    /** laufende Abstimmung zum Abbrechen: { by, yes: Set<seat>, expiresAt } */
+    this.abortVote = null;
+    this.abortRejectedBy = null;
+    /** Punkteliste: eine Zeile pro Runde */
+    this.scores = [];
+    this.recordedGame = null;
     this.status = 'lobby'; // 'lobby' | 'running'
     /** @type {SkatGame|null} aktuelle Runde */
     this.game = null;
@@ -168,38 +186,133 @@ export class Room {
     this.round = 1;
     this.dealer = SEAT_COUNT - 1;
     this.game = this.createGame({ dealer: this.dealer });
+    this.scores = []; // neue Sitzung = neue Punkteliste
+    this.recordedGame = null;
+    this.abortVote = null;
+    this.abortRejectedBy = null;
     this.touch();
   }
 
-  /** Spiel abbrechen, zurück in die Lobby. */
-  stop(token) {
-    this.requireSeatedInGame(token, 'das Spiel beenden');
-    this.status = 'lobby';
-    this.game = null;
-    this.touch();
+  // ---------- Spielzüge (werden an SkatGame weitergereicht) ----------
+
+  /** Reizen: 'bid' (sagen/weiter/18 spielen), 'hold' ("Ja"), 'pass' */
+  bid(token, action) {
+    this.gameAction(token, 'reizen', (seat) => this.game.bid(seat, action));
   }
 
-  /** Alleinspieler sagt das Spiel an ({ type: 'grand' } oder { type: 'suit', trump }). */
-  declare(token, game) {
-    const p = this.requireSeatedInGame(token, 'das Spiel ansagen');
-    this.game.declare(p.seat, game);
-    this.touch();
+  pickUpSkat(token) {
+    this.gameAction(token, 'den Skat aufnehmen', (seat) => this.game.pickUpSkat(seat));
+  }
+
+  discard(token, cards) {
+    this.gameAction(token, 'drücken', (seat) => this.game.discard(seat, cards));
+  }
+
+  /** Ansage: { type: 'suit'|'grand'|'null', trump?, schneiderAnnounced?, schwarzAnnounced?, ouvert? } */
+  declare(token, spec) {
+    this.gameAction(token, 'das Spiel ansagen', (seat) => this.game.declare(seat, spec));
   }
 
   playCard(token, card) {
-    const p = this.requireSeatedInGame(token, 'Karten spielen');
-    this.game.play(p.seat, card);
-    this.touch();
+    this.gameAction(token, 'Karten spielen', (seat) => this.game.play(seat, card));
   }
 
-  /** Nach dem Ende einer Runde: neu geben, Geber rückt eins weiter → Alleinspieler wechselt reihum. */
+  /** Nach dem Ende (oder Einpassen) einer Runde: neu geben, Geber rückt eins weiter. */
   nextRound(token) {
     this.requireSeatedInGame(token, 'eine neue Runde starten');
-    if (this.game.phase !== 'finished') throw new RoomError('RUNDE_LAEUFT', 'Die Runde ist noch nicht zu Ende.');
+    if (!['finished', 'passed'].includes(this.game.phase)) {
+      throw new RoomError('RUNDE_LAEUFT', 'Die Runde ist noch nicht zu Ende.');
+    }
     this.dealer = (this.dealer + 1) % SEAT_COUNT;
     this.round++;
     this.game = this.createGame({ dealer: this.dealer });
     this.touch();
+  }
+
+  gameAction(token, verb, fn) {
+    const p = this.requireSeatedInGame(token, verb);
+    fn(p.seat);
+    this.recordScore();
+    this.touch();
+  }
+
+  /** Runde in die Punkteliste eintragen – genau einmal pro Runde. */
+  recordScore() {
+    const g = this.game;
+    if (this.recordedGame === g) return;
+    if (g.phase === 'passed') {
+      this.scores.push({ round: this.round, declarer: null, label: 'eingepasst', bid: null, value: 0, score: 0, won: null });
+    } else if (g.phase === 'finished') {
+      const r = g.result;
+      this.scores.push({ round: this.round, declarer: g.declarer, label: r.label, bid: g.bidValue, value: r.value, score: r.score, won: r.won });
+    } else {
+      return;
+    }
+    this.recordedGame = g;
+  }
+
+  /** Summe pro Platz: gewonnen +Spielwert, verloren −2× Spielwert */
+  totals() {
+    const sums = Array(SEAT_COUNT).fill(0);
+    for (const row of this.scores) if (row.declarer !== null) sums[row.declarer] += row.score;
+    return sums;
+  }
+
+  // ---------- Abbrechen nur gemeinsam ----------
+
+  /** Abbruch vorschlagen (zählt gleich als eigene Zustimmung). */
+  requestAbort(token) {
+    const p = this.requireSeatedInGame(token, 'den Abbruch vorschlagen');
+    this.expireAbortVote();
+    if (!this.abortVote) {
+      this.abortVote = { by: p.seat, yes: new Set(), expiresAt: this.now() + this.abortVoteMs };
+      this.abortRejectedBy = null;
+    }
+    this.abortVote.yes.add(p.seat);
+    this.checkAbort();
+    this.touch();
+  }
+
+  /** Zustimmen (agree = true) oder ablehnen. Eine Ablehnung beendet die Abstimmung sofort. */
+  voteAbort(token, agree) {
+    const p = this.requireSeatedInGame(token, 'abstimmen');
+    this.expireAbortVote();
+    if (!this.abortVote) throw new RoomError('KEINE_ABSTIMMUNG', 'Es läuft gerade keine Abstimmung.');
+    if (agree !== true) {
+      this.abortVote = null;
+      this.abortRejectedBy = p.seat;
+    } else {
+      this.abortVote.yes.add(p.seat);
+      this.checkAbort();
+    }
+    this.touch();
+  }
+
+  /** Alle zugestimmt? Wer länger als absentMs getrennt ist, blockiert nicht (sonst hinge der Tisch fest). */
+  checkAbort() {
+    const missing = this.abortMissing();
+    if (missing.length > 0) return false;
+    this.status = 'lobby';
+    this.game = null;
+    this.abortVote = null;
+    return true;
+  }
+
+  abortMissing() {
+    const now = this.now();
+    return this.seats
+      .map((t, seat) => ({ seat, p: this.players.get(t) }))
+      .filter(({ seat, p }) => !this.abortVote.yes.has(seat) && (p.connected || now - p.lastSeen < this.absentMs))
+      .map(({ seat }) => seat);
+  }
+
+  /** Abgelaufene Abstimmung verwerfen. @returns {boolean} ob etwas abgelaufen ist */
+  expireAbortVote() {
+    if (this.abortVote && this.now() >= this.abortVote.expiresAt) {
+      this.abortVote = null;
+      return true;
+    }
+    return false;
   }
 
   // ---------- Aufräumen ----------
@@ -245,6 +358,20 @@ export class Room {
       you: me ? { id: me.id, name: me.name, seat: me.seat } : null,
       canStart: !!me && me.seat !== null && this.isReady(),
       game: this.game ? this.game.viewFor(me?.seat ?? null) : null,
+      scores: { rounds: this.scores.map((r) => ({ ...r })), totals: this.totals() },
+      abortVote: this.abortVoteView(),
+      abortRejectedBy: this.abortRejectedBy,
+    };
+  }
+
+  abortVoteView() {
+    const vote = this.abortVote;
+    if (!vote || this.now() >= vote.expiresAt) return null;
+    return {
+      by: vote.by,
+      yes: [...vote.yes].sort(),
+      waitingFor: this.abortMissing(),
+      remainingMs: vote.expiresAt - this.now(),
     };
   }
 

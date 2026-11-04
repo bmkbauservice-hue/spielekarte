@@ -111,6 +111,19 @@ describe('Spielwert Farbe/Grand', () => {
     assert.equal(r.value, 30);
   });
 
+  test('Schneider-Grenzen: 90 ja, 89 nein; 30 ja, 31 nein', () => {
+    assert.equal(play(herz(), twelve('kreuz-B'), 90, 8).schneider, true);
+    assert.equal(play(herz(), twelve('kreuz-B'), 89, 8).schneider, false);
+    assert.equal(play(herz(), twelve('kreuz-B'), 30, 2).schneider, true);
+    assert.equal(play(herz(), twelve('kreuz-B'), 31, 2).schneider, false);
+  });
+
+  test('Schwarz: alle oder keine Stiche – 120 Augen allein reichen nicht', () => {
+    assert.equal(play(herz(), twelve('kreuz-B'), 120, 10).schwarz, true);
+    assert.equal(play(herz(), twelve('kreuz-B'), 0, 0).schwarz, true);
+    assert.equal(play(herz(), twelve('kreuz-B'), 120, 9).schwarz, false);
+  });
+
   test('Schwarz erspielt: Schneider + Schwarz', () => {
     const r = play(herz(), twelve('kreuz-B'), 120, 10);
     assert.deepEqual(r.levels.map((l) => l.label), ['mit 1', 'Spiel', 'Schneider', 'Schwarz']);

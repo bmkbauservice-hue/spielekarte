@@ -87,21 +87,6 @@ function beats(challenger, current, lead, game) {
   return cardStrength(challenger, game) > cardStrength(current, game);
 }
 
-/**
- * Auswertung aus Sicht des Alleinspielers (inkl. Skat).
- * Gewonnen ab 61 Augen. Schneider: eine Partei hat höchstens 30 Augen. Schwarz: eine Partei ohne Stich.
- */
-export function evaluate(declarerPoints, declarerTricks, totalTricks = 10) {
-  const defenderPoints = 120 - declarerPoints;
-  return {
-    declarerPoints,
-    defenderPoints,
-    won: declarerPoints >= 61,
-    schneider: declarerPoints <= 30 || defenderPoints <= 30,
-    schwarz: declarerTricks === 0 || declarerTricks === totalTricks,
-  };
-}
-
 /** Hand fürs Anzeigen sortieren: Trümpfe zuerst (stärkste links), dann Farben Kreuz, Pik, Herz, Karo. */
 export function sortHand(hand, game = { type: 'grand' }) {
   const group = (card) => {

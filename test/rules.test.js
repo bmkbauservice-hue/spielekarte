@@ -2,7 +2,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { createDeck, shuffle, parseCard, sumPoints, cardPoints, isCard } from '../src/game/cards.js';
 import {
-  isTrump, effectiveSuit, legalCards, trickWinner, cardStrength, evaluate, sortHand, isValidGame, TRUMP,
+  isTrump, effectiveSuit, legalCards, trickWinner, cardStrength, sortHand, isValidGame, TRUMP,
 } from '../src/game/rules.js';
 
 const GRAND = { type: 'grand' };
@@ -182,24 +182,6 @@ describe('Stichgewinner', () => {
 
   test('Farbspiel Kreuz: Pik-Bube sticht Kreuz-Ass', () => {
     assert.equal(trickWinner(['kreuz-A', 'pik-B', 'kreuz-10'], KREUZ), 1);
-  });
-});
-
-describe('Auswertung', () => {
-  test('61 Augen gewinnt, 60 verliert', () => {
-    assert.equal(evaluate(61, 5).won, true);
-    assert.equal(evaluate(60, 5).won, false);
-    assert.equal(evaluate(60, 5).defenderPoints, 60);
-  });
-
-  test('Schneider und Schwarz', () => {
-    assert.equal(evaluate(90, 8).schneider, true);
-    assert.equal(evaluate(89, 8).schneider, false);
-    assert.equal(evaluate(30, 2).schneider, true);
-    assert.equal(evaluate(31, 2).schneider, false);
-    assert.equal(evaluate(120, 10).schwarz, true);
-    assert.equal(evaluate(0, 0).schwarz, true);
-    assert.equal(evaluate(120, 9).schwarz, false, '120 Augen ohne alle Stiche ist nicht schwarz');
   });
 });
 
