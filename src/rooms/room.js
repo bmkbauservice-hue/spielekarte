@@ -3,11 +3,13 @@
 
 import { randomBytes } from 'node:crypto';
 import { SkatGame } from '../game/game.js';
+import { simpleTotals, seegerFabianTotals, summarizeEvening } from '../game/stats.js';
 
 export const SEAT_COUNT = 3;
 export const MAX_SPECTATORS = 20;
 export const NAME_MAX_LENGTH = 20;
-export const ABORT_VOTE_MS = 60_000; // Abbruch-Abstimmung läuft 60 s
+export const VOTE_MS = 60_000; // Abstimmungen (Abbrechen, Abend beenden) laufen 60 s
+export const VOTE_KINDS = ['abort', 'end'];
 export const ABSENT_MS = 120_000; // wer 2 min getrennt ist, blockiert den Abbruch nicht
 
 /** Fehler mit maschinenlesbarem Code (für den Client) und deutschem Text (für Menschen). */
@@ -47,27 +49,30 @@ export class Room {
    * @param {object} [options]  alles austauschbar, damit Tests Zeit und Kartenverteilung steuern können
    * @param {() => number} [options.now]
    * @param {(opts: { dealer: number }) => SkatGame} [options.createGame]
-   * @param {number} [options.abortVoteMs]  so lange läuft eine Abbruch-Abstimmung
-   * @param {number} [options.absentMs]     wer so lange getrennt ist, blockiert den Abbruch nicht
+   * @param {number} [options.voteMs]  so lange läuft eine Abstimmung
+   * @param {number} [options.absentMs]     wer so lange getrennt ist, blockiert eine Abstimmung nicht
    */
   constructor(id, {
     now = Date.now,
     createGame = (opts) => new SkatGame(opts),
-    abortVoteMs = ABORT_VOTE_MS,
+    voteMs = VOTE_MS,
     absentMs = ABSENT_MS,
   } = {}) {
     this.id = id;
     this.now = now;
     this.createGame = createGame;
-    this.abortVoteMs = abortVoteMs;
+    this.voteMs = voteMs;
     this.absentMs = absentMs;
-    /** laufende Abstimmung zum Abbrechen: { by, yes: Set<seat>, expiresAt } */
-    this.abortVote = null;
-    this.abortRejectedBy = null;
-    /** Punkteliste: eine Zeile pro Runde */
+    /** laufende Abstimmung: { kind: 'abort'|'end', by, yes: Set<seat>, expiresAt } */
+    this.vote = null;
+    this.voteRejectedBy = null;
+    /** Punkteliste = Spielhistorie des Abends: eine Zeile pro Runde */
     this.scores = [];
     this.recordedGame = null;
-    this.status = 'lobby'; // 'lobby' | 'running'
+    this.eveningStartedAt = null;
+    /** Abendwertung nach "Abend beenden" */
+    this.summary = null;
+    this.status = 'lobby'; // 'lobby' | 'running' | 'summary'
     /** @type {SkatGame|null} aktuelle Runde */
     this.game = null;
     this.round = 0;
@@ -172,24 +177,27 @@ export class Room {
   /** Startbereit: Lobby, alle 3 Plätze besetzt, alle verbunden. */
   isReady() {
     return (
-      this.status === 'lobby' &&
+      this.status !== 'running' &&
       this.seats.every((t) => t !== null && this.players.get(t)?.connected)
     );
   }
 
+  /** Neuen Abend starten – aus der Lobby oder nach der Abendwertung ("Neuer Abend"). */
   start(token) {
     const p = this.require(token);
-    this.requireLobby();
+    if (this.status === 'running') throw new RoomError('SPIEL_LAEUFT', 'Es läuft schon ein Spiel.');
     if (p.seat === null) throw new RoomError('NUR_SPIELER', 'Nur Spieler am Tisch können das Spiel starten.');
     if (!this.isReady()) throw new RoomError('NICHT_BEREIT', 'Es müssen 3 verbundene Spieler am Tisch sitzen.');
     this.status = 'running';
     this.round = 1;
     this.dealer = SEAT_COUNT - 1;
     this.game = this.createGame({ dealer: this.dealer });
-    this.scores = []; // neue Sitzung = neue Punkteliste
+    this.scores = []; // neuer Abend = alles auf null
     this.recordedGame = null;
-    this.abortVote = null;
-    this.abortRejectedBy = null;
+    this.vote = null;
+    this.voteRejectedBy = null;
+    this.summary = null;
+    this.eveningStartedAt = this.now();
     this.touch();
   }
 
@@ -253,66 +261,91 @@ export class Room {
 
   /** Summe pro Platz: gewonnen +Spielwert, verloren −2× Spielwert */
   totals() {
-    const sums = Array(SEAT_COUNT).fill(0);
-    for (const row of this.scores) if (row.declarer !== null) sums[row.declarer] += row.score;
-    return sums;
+    return simpleTotals(this.scores);
   }
 
-  // ---------- Abbrechen nur gemeinsam ----------
+  // ---------- Abstimmungen: Abbrechen / Abend beenden – nur gemeinsam ----------
 
-  /** Abbruch vorschlagen (zählt gleich als eigene Zustimmung). */
-  requestAbort(token) {
-    const p = this.requireSeatedInGame(token, 'den Abbruch vorschlagen');
-    this.expireAbortVote();
-    if (!this.abortVote) {
-      this.abortVote = { by: p.seat, yes: new Set(), expiresAt: this.now() + this.abortVoteMs };
-      this.abortRejectedBy = null;
+  /**
+   * Abstimmung vorschlagen (zählt gleich als eigene Zustimmung).
+   * kind 'abort' → zurück in die Lobby, 'end' → Abendwertung.
+   */
+  requestVote(token, kind) {
+    if (!VOTE_KINDS.includes(kind)) throw new RoomError('ABSTIMMUNG_UNGUELTIG', 'Unbekannte Abstimmung.');
+    const p = this.requireSeatedInGame(token, 'eine Abstimmung vorschlagen');
+    this.expireVote();
+    if (this.vote && this.vote.kind !== kind) {
+      throw new RoomError('ABSTIMMUNG_LAEUFT', 'Es läuft schon eine andere Abstimmung.');
     }
-    this.abortVote.yes.add(p.seat);
-    this.checkAbort();
+    if (!this.vote) {
+      this.vote = { kind, by: p.seat, yes: new Set(), expiresAt: this.now() + this.voteMs };
+      this.voteRejectedBy = null;
+    }
+    this.vote.yes.add(p.seat);
+    this.checkVote();
     this.touch();
   }
 
   /** Zustimmen (agree = true) oder ablehnen. Eine Ablehnung beendet die Abstimmung sofort. */
-  voteAbort(token, agree) {
+  castVote(token, agree) {
     const p = this.requireSeatedInGame(token, 'abstimmen');
-    this.expireAbortVote();
-    if (!this.abortVote) throw new RoomError('KEINE_ABSTIMMUNG', 'Es läuft gerade keine Abstimmung.');
+    this.expireVote();
+    if (!this.vote) throw new RoomError('KEINE_ABSTIMMUNG', 'Es läuft gerade keine Abstimmung.');
     if (agree !== true) {
-      this.abortVote = null;
-      this.abortRejectedBy = p.seat;
+      this.vote = null;
+      this.voteRejectedBy = p.seat;
     } else {
-      this.abortVote.yes.add(p.seat);
-      this.checkAbort();
+      this.vote.yes.add(p.seat);
+      this.checkVote();
     }
     this.touch();
   }
 
   /** Alle zugestimmt? Wer länger als absentMs getrennt ist, blockiert nicht (sonst hinge der Tisch fest). */
-  checkAbort() {
-    const missing = this.abortMissing();
-    if (missing.length > 0) return false;
-    this.status = 'lobby';
+  checkVote() {
+    if (this.voteMissing().length > 0) return false;
+    const { kind } = this.vote;
+    this.vote = null;
+    if (kind === 'end') {
+      this.summary = summarizeEvening({
+        rows: this.scores,
+        names: this.seats.map((t) => this.players.get(t).name),
+        startedAt: this.eveningStartedAt,
+        endedAt: this.now(),
+      });
+      this.status = 'summary';
+    } else {
+      this.status = 'lobby';
+    }
     this.game = null;
-    this.abortVote = null;
     return true;
   }
 
-  abortMissing() {
+  voteMissing() {
     const now = this.now();
     return this.seats
       .map((t, seat) => ({ seat, p: this.players.get(t) }))
-      .filter(({ seat, p }) => !this.abortVote.yes.has(seat) && (p.connected || now - p.lastSeen < this.absentMs))
+      .filter(({ seat, p }) => !this.vote.yes.has(seat) && (p.connected || now - p.lastSeen < this.absentMs))
       .map(({ seat }) => seat);
   }
 
   /** Abgelaufene Abstimmung verwerfen. @returns {boolean} ob etwas abgelaufen ist */
-  expireAbortVote() {
-    if (this.abortVote && this.now() >= this.abortVote.expiresAt) {
-      this.abortVote = null;
+  expireVote() {
+    if (this.vote && this.now() >= this.vote.expiresAt) {
+      this.vote = null;
       return true;
     }
     return false;
+  }
+
+  /** Nach der Abendwertung zurück in die Lobby (Plätze wieder frei wählbar). */
+  backToLobby(token) {
+    const p = this.require(token);
+    if (this.status !== 'summary') throw new RoomError('KEINE_WERTUNG', 'Es gibt gerade keine Abendwertung.');
+    if (p.seat === null) throw new RoomError('NUR_SPIELER', 'Nur Spieler am Tisch können das.');
+    this.status = 'lobby';
+    this.summary = null;
+    this.touch();
   }
 
   // ---------- Aufräumen ----------
@@ -358,19 +391,25 @@ export class Room {
       you: me ? { id: me.id, name: me.name, seat: me.seat } : null,
       canStart: !!me && me.seat !== null && this.isReady(),
       game: this.game ? this.game.viewFor(me?.seat ?? null) : null,
-      scores: { rounds: this.scores.map((r) => ({ ...r })), totals: this.totals() },
-      abortVote: this.abortVoteView(),
-      abortRejectedBy: this.abortRejectedBy,
+      scores: {
+        rounds: this.scores.map((r) => ({ ...r })),
+        totals: this.totals(),
+        seegerFabian: seegerFabianTotals(this.scores),
+      },
+      vote: this.voteView(),
+      voteRejectedBy: this.voteRejectedBy,
+      summary: this.summary,
     };
   }
 
-  abortVoteView() {
-    const vote = this.abortVote;
+  voteView() {
+    const vote = this.vote;
     if (!vote || this.now() >= vote.expiresAt) return null;
     return {
+      kind: vote.kind,
       by: vote.by,
       yes: [...vote.yes].sort(),
-      waitingFor: this.abortMissing(),
+      waitingFor: this.voteMissing(),
       remainingMs: vote.expiresAt - this.now(),
     };
   }

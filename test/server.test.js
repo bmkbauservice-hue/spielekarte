@@ -262,7 +262,7 @@ describe('Abbruch-Abstimmung per Socket.IO', () => {
   const sockets = [];
 
   before(async () => {
-    app = createApp({ registry: new RoomRegistry({ roomOptions: { abortVoteMs: 200 } }) });
+    app = createApp({ registry: new RoomRegistry({ roomOptions: { voteMs: 200 } }) });
     await new Promise((r) => app.httpServer.listen(0, '127.0.0.1', r));
     url = `http://127.0.0.1:${app.httpServer.address().port}`;
   });
@@ -284,24 +284,40 @@ describe('Abbruch-Abstimmung per Socket.IO', () => {
   test('einer allein bricht nicht ab; Abstimmung läuft automatisch ab und alle erfahren es', async () => {
     const [a, b, c] = [await connect('A'), await connect('B'), await connect('C')];
     await request(a, 'game:start');
-    assert.equal((await request(a, 'game:abort')).ok, true);
+    assert.equal((await request(a, 'vote:request', { kind: 'abort' })).ok, true);
     await new Promise((r) => setTimeout(r, 30));
     assert.equal(c.latest.status, 'running');
-    assert.deepEqual(c.latest.abortVote.waitingFor, [1, 2]);
+    assert.deepEqual(c.latest.vote.waitingFor, [1, 2]);
 
     // ohne weitere Klicks: nach 200 ms schickt der Server allen den neuen Stand
     const deadline = Date.now() + 1500;
-    while (c.latest.abortVote !== null && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
-    assert.equal(c.latest.abortVote, null);
+    while (c.latest.vote !== null && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+    assert.equal(c.latest.vote, null);
     assert.equal(b.latest.status, 'running');
   });
 
   test('alle drei stimmen zu → Lobby', async () => {
     const room = app.registry.get('ABBRUCH');
     const [a, b, c] = sockets.slice(-3);
-    await request(a, 'game:abort');
-    await request(b, 'game:abort-vote', { agree: true });
-    assert.equal((await request(c, 'game:abort-vote', { agree: true })).ok, true);
+    await request(a, 'vote:request', { kind: 'abort' });
+    await request(b, 'vote:cast', { agree: true });
+    assert.equal((await request(c, 'vote:cast', { agree: true })).ok, true);
     assert.equal(room.status, 'lobby');
+  });
+
+  test('Abend beenden → alle bekommen die Abendwertung → Neuer Abend', async () => {
+    const room = app.registry.get('ABBRUCH');
+    const [a, b, c] = sockets.slice(-3);
+    await request(a, 'game:start');
+    await request(b, 'vote:request', { kind: 'end' });
+    await request(a, 'vote:cast', { agree: true });
+    await request(c, 'vote:cast', { agree: true });
+    assert.equal(room.status, 'summary');
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(a.latest.summary.players.length, 3);
+    assert.deepEqual(a.latest.summary, c.latest.summary);
+    assert.equal((await request(c, 'evening:new')).ok, true);
+    assert.equal(room.status, 'running');
+    assert.equal(room.summary, null);
   });
 });

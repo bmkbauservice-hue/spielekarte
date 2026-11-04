@@ -200,23 +200,25 @@ export function createApp({
       room.declare(token, { type, trump, schneiderAnnounced, schwarzAnnounced, ouvert }));
     action('game:play', (room, token, { card }) => room.playCard(token, card));
     action('game:next', (room, token) => room.nextRound(token));
-    action('game:abort', (room, token) => room.requestAbort(token));
-    action('game:abort-vote', (room, token, { agree }) => room.voteAbort(token, agree === true));
+    action('vote:request', (room, token, { kind }) => room.requestVote(token, kind));
+    action('vote:cast', (room, token, { agree }) => room.castVote(token, agree === true));
+    action('evening:new', (room, token) => room.start(token));
+    action('evening:lobby', (room, token) => room.backToLobby(token));
 
     socket.on('disconnect', () => detach(socket));
   });
 
-  // Abbruch-Abstimmung läuft ab, ohne dass jemand klickt → allen Bescheid geben
+  // Abstimmung läuft ab, ohne dass jemand klickt → allen Bescheid geben
   /** @type {Map<string, NodeJS.Timeout>} */
   const voteTimers = new Map();
   function scheduleVoteExpiry(room) {
     clearTimeout(voteTimers.get(room.id));
     voteTimers.delete(room.id);
-    if (!room.abortVote) return;
+    if (!room.vote) return;
     const timer = setTimeout(() => {
       voteTimers.delete(room.id);
-      if (room.expireAbortVote()) broadcast(room);
-    }, Math.max(0, room.abortVote.expiresAt - room.now()) + 50);
+      if (room.expireVote()) broadcast(room);
+    }, Math.max(0, room.vote.expiresAt - room.now()) + 50);
     timer.unref();
     voteTimers.set(room.id, timer);
   }

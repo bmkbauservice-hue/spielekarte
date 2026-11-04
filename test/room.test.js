@@ -239,7 +239,7 @@ describe('Room – Skat-Runde', () => {
     assert.equal(view.game.dealer, 2);
     assert.equal(view.game.turn, 1);
     assert.equal(view.game.hand.length, 10);
-    assert.deepEqual(view.scores, { rounds: [], totals: [0, 0, 0] });
+    assert.deepEqual(view.scores, { rounds: [], totals: [0, 0, 0], seegerFabian: [0, 0, 0] });
   });
 
   test('jeder Spieler sieht nur seine eigenen Karten, Zuschauer keine', () => {
@@ -335,25 +335,25 @@ describe('Room – Skat-Runde', () => {
     room.start(t[0]);
     room.bid(t[1], 'pass'); room.bid(t[2], 'pass'); room.bid(t[0], 'pass');
     assert.equal(room.scores.length, 1);
-    for (const token of t) room.requestAbort(token);
+    for (const token of t) room.requestVote(token, 'abort');
     room.start(t[0]);
     assert.equal(room.scores.length, 0);
   });
 });
 
-describe('Room – Abbrechen nur gemeinsam', () => {
+describe('Room – Abstimmungen nur gemeinsam', () => {
   function running(options) {
     const now = fakeClock();
-    const { room, players } = roomWith(4, { now, abortVoteMs: 60_000, absentMs: 120_000, ...options });
+    const { room, players } = roomWith(4, { now, voteMs: 60_000, absentMs: 120_000, ...options });
     room.start(players[0].token);
     return { room, now, t: players.map((p) => p.token) };
   }
 
   test('ein einzelner Spieler kann nicht abbrechen', () => {
     const { room, t } = running();
-    room.requestAbort(t[0]);
+    room.requestVote(t[0], 'abort');
     assert.equal(room.status, 'running');
-    const vote = room.stateFor(t[1]).abortVote;
+    const vote = room.stateFor(t[1]).vote;
     assert.deepEqual(vote.yes, [0]);
     assert.deepEqual(vote.waitingFor, [1, 2]);
     assert.equal(vote.remainingMs, 60_000);
@@ -361,56 +361,141 @@ describe('Room – Abbrechen nur gemeinsam', () => {
 
   test('alle drei stimmen zu → zurück in die Lobby', () => {
     const { room, t } = running();
-    room.requestAbort(t[0]);
-    room.voteAbort(t[1], true);
+    room.requestVote(t[0], 'abort');
+    room.castVote(t[1], true);
     assert.equal(room.status, 'running');
-    room.voteAbort(t[2], true);
+    room.castVote(t[2], true);
     assert.equal(room.status, 'lobby');
     assert.equal(room.game, null);
-    assert.equal(room.stateFor(t[0]).abortVote, null);
+    assert.equal(room.stateFor(t[0]).vote, null);
   });
 
   test('einer lehnt ab → Abstimmung beendet, Spiel läuft weiter', () => {
     const { room, t } = running();
-    room.requestAbort(t[0]);
-    room.voteAbort(t[1], false);
-    assert.equal(room.abortVote, null);
-    assert.equal(room.stateFor(t[0]).abortRejectedBy, 1);
-    throwsCode(() => room.voteAbort(t[2], true), 'KEINE_ABSTIMMUNG');
+    room.requestVote(t[0], 'abort');
+    room.castVote(t[1], false);
+    assert.equal(room.vote, null);
+    assert.equal(room.stateFor(t[0]).voteRejectedBy, 1);
+    throwsCode(() => room.castVote(t[2], true), 'KEINE_ABSTIMMUNG');
     assert.equal(room.status, 'running');
   });
 
   test('Abstimmung läuft nach 60 s ab', () => {
     const { room, now, t } = running();
-    room.requestAbort(t[0]);
-    room.voteAbort(t[1], true);
+    room.requestVote(t[0], 'abort');
+    room.castVote(t[1], true);
     now.advance(59_999);
-    assert.ok(room.stateFor(t[0]).abortVote);
+    assert.ok(room.stateFor(t[0]).vote);
     now.advance(1);
-    assert.equal(room.stateFor(t[0]).abortVote, null);
-    assert.equal(room.expireAbortVote(), true);
-    throwsCode(() => room.voteAbort(t[2], true), 'KEINE_ABSTIMMUNG');
+    assert.equal(room.stateFor(t[0]).vote, null);
+    assert.equal(room.expireVote(), true);
+    throwsCode(() => room.castVote(t[2], true), 'KEINE_ABSTIMMUNG');
     assert.equal(room.status, 'running');
   });
 
   test('Zuschauer dürfen nicht abstimmen', () => {
     const { room, t } = running();
-    throwsCode(() => room.requestAbort(t[3]), 'NUR_SPIELER');
-    room.requestAbort(t[0]);
-    throwsCode(() => room.voteAbort(t[3], true), 'NUR_SPIELER');
+    throwsCode(() => room.requestVote(t[3], 'abort'), 'NUR_SPIELER');
+    room.requestVote(t[0], 'abort');
+    throwsCode(() => room.castVote(t[3], true), 'NUR_SPIELER');
   });
 
   test('wer länger als 2 min getrennt ist, blockiert nicht – kürzer schon', () => {
     const { room, now, t } = running();
     room.disconnect(t[2]);
     now.advance(60_000);
-    room.requestAbort(t[0]);
-    room.voteAbort(t[1], true);
+    room.requestVote(t[0], 'abort');
+    room.castVote(t[1], true);
     assert.equal(room.status, 'running', 'erst 1 min weg → zählt noch');
-    room.expireAbortVote();
+    room.expireVote();
     now.advance(61_000); // jetzt > 2 min getrennt
-    room.requestAbort(t[0]);
-    room.voteAbort(t[1], true);
+    room.requestVote(t[0], 'abort');
+    room.castVote(t[1], true);
     assert.equal(room.status, 'lobby');
+  });
+});
+
+describe('Room – Abend beenden und Abendwertung', () => {
+  function evening() {
+    const now = fakeClock();
+    const { room, players } = roomWith(3, { now });
+    const t = players.map((p) => p.token);
+    room.start(t[0]);
+    return { room, now, t };
+  }
+
+  /** Eine Runde: Vorhand spielt Grand Hand mit jeweils der ersten erlaubten Karte */
+  function playRound(room, t) {
+    const g = room.game;
+    room.bid(t[g.middle], 'pass');
+    room.bid(t[g.rear], 'pass');
+    room.bid(t[g.forehand], 'bid');
+    room.declare(t[g.forehand], { type: 'grand' });
+    while (room.game.phase === 'playing') {
+      room.playCard(t[room.game.turn], room.game.legalFor(room.game.turn)[0]);
+    }
+  }
+
+  test('braucht alle drei; danach dieselbe Wertung für alle', () => {
+    const { room, now, t } = evening();
+    playRound(room, t);
+    room.nextRound(t[0]);
+    now.advance(90 * 60_000);
+
+    room.requestVote(t[1], 'end');
+    room.castVote(t[0], true);
+    assert.equal(room.status, 'running', 'zwei von drei reichen nicht');
+    room.castVote(t[2], true);
+    assert.equal(room.status, 'summary');
+    assert.equal(room.game, null);
+
+    const views = t.map((token) => room.stateFor(token).summary);
+    assert.deepEqual(views[0], views[2], 'alle sehen dieselbe Zusammenfassung');
+    const s = views[0];
+    assert.equal(s.games, 1, 'nur abgeschlossene Runden zählen');
+    assert.equal(s.durationMs, 90 * 60_000);
+    assert.deepEqual(s.players.map((p) => p.name), ['Spieler 1', 'Spieler 2', 'Spieler 3']);
+    assert.equal(s.players[0].declarerGames, 1);
+    assert.equal(s.players[0].points, room.scores[0].score);
+  });
+
+  test('Abbrechen und Abend beenden laufen nicht gleichzeitig', () => {
+    const { room, t } = evening();
+    room.requestVote(t[0], 'abort');
+    throwsCode(() => room.requestVote(t[1], 'end'), 'ABSTIMMUNG_LAEUFT');
+    throwsCode(() => room.requestVote(t[1], 'quatsch'), 'ABSTIMMUNG_UNGUELTIG');
+  });
+
+  test('"Neuer Abend" setzt alles auf null, "Lobby" gibt die Plätze frei', () => {
+    const { room, now, t } = evening();
+    playRound(room, t);
+    for (const token of t) room.requestVote(token, 'end');
+    assert.equal(room.status, 'summary');
+    throwsCode(() => room.leaveSeat(t[0]), 'SPIEL_LAEUFT');
+
+    now.advance(1000);
+    room.start(t[2]); // Neuer Abend
+    assert.equal(room.status, 'running');
+    assert.deepEqual(room.scores, []);
+    assert.equal(room.summary, null);
+    assert.equal(room.round, 1);
+    assert.equal(room.eveningStartedAt, now());
+
+    for (const token of t) room.requestVote(token, 'end');
+    room.backToLobby(t[1]);
+    assert.equal(room.status, 'lobby');
+    assert.equal(room.stateFor(t[0]).summary, null);
+    room.leaveSeat(t[0]);
+    throwsCode(() => room.backToLobby(t[1]), 'KEINE_WERTUNG');
+  });
+
+  test('Live-Liste enthält Seeger-Fabian als Zusatzspalte', () => {
+    const { room, t } = evening();
+    playRound(room, t);
+    const { totals, seegerFabian } = room.stateFor(t[0]).scores;
+    const r = room.scores[0];
+    assert.equal(totals[0], r.score);
+    assert.equal(seegerFabian[0], r.won ? r.score + 50 : r.score - 50);
+    assert.equal(seegerFabian[1], r.won ? 0 : 40);
   });
 });

@@ -25,6 +25,7 @@
   const show = (view) => VIEWS.forEach((v) => { $(v).hidden = v !== view; });
 
   let state = null;
+  let lastStatus = null;
   let replaced = false; // true, wenn ein anderer Tab den Platz übernommen hat
 
   // ---------- Verbindung ----------
@@ -124,8 +125,13 @@
     // Spiel
     $('game').hidden = lobby || !state.game;
     if (!lobby && state.game) renderGame(state.game, seated);
+    $('summary').hidden = status !== 'summary';
+    if (status === 'summary') renderSummary(seated);
+    // Beim Wechsel in die Abendwertung nach oben scrollen, damit man sie sofort sieht
+    if (status === 'summary' && lastStatus !== 'summary') window.scrollTo({ top: 0, behavior: 'smooth' });
+    lastStatus = status;
     renderScores();
-    renderAbort(seated);
+    renderVote(seated);
   }
 
   // ---------- Spiel-Anzeige ----------
@@ -184,7 +190,8 @@
     renderResult(game, seated);
     renderHand(game, myTurn, meDeclarer);
 
-    $('btn-abort').hidden = !seated || !!state.abortVote;
+    $('btn-abort').hidden = !seated || !!state.vote;
+    $('btn-end').hidden = !seated || !!state.vote;
   }
 
   function infoLine(game) {
@@ -434,30 +441,72 @@
       return tr;
     }));
     $('scores-total').replaceChildren(cell('td', ''), cell('td', 'Summe'), ...totals.map((t) => cell('td', signed(t))));
+    $('scores-sf').replaceChildren(cell('td', ''), cell('td', 'Seeger-Fabian'), ...state.scores.seegerFabian.map((t) => cell('td', signed(t))));
   }
 
-  // ----- Abbruch-Abstimmung -----
+  // ----- Abendwertung -----
 
+  function duration(ms) {
+    const min = Math.round(ms / 60_000);
+    return min < 60 ? `${min} min` : `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, '0')} min`;
+  }
+
+  function renderSummary(seated) {
+    const s = state.summary;
+    $('summary-meta').textContent =
+      `${s.games} ${s.games === 1 ? 'Spiel' : 'Spiele'}, davon ${s.passed} eingepasst · Dauer ${duration(s.durationMs)}`;
+    const ranked = [...s.players].sort((a, b) => a.place - b.place || a.seat - b.seat);
+    $('summary-players').replaceChildren(...ranked.map((p) => {
+      const li = document.createElement('li');
+      li.className = `sp place-${p.place}`;
+      const head = document.createElement('div');
+      head.className = 'sp-head';
+      const place = document.createElement('span');
+      place.className = 'sp-place';
+      place.textContent = `${p.place}.`;
+      const name = document.createElement('span');
+      name.className = 'sp-name';
+      name.textContent = p.name;
+      const pts = document.createElement('span');
+      pts.className = 'sp-points';
+      pts.textContent = signed(p.points);
+      head.append(place, name, pts);
+      const details = document.createElement('p');
+      details.className = 'sp-details';
+      details.textContent = [
+        `Seeger-Fabian ${signed(p.seegerFabian)}`,
+        `${p.declarerGames}× Alleinspieler (${p.won} gewonnen, ${p.lost} verloren)`,
+        p.best ? `Bestes Spiel: ${p.best.label} (${p.best.value})` : 'Noch kein Spiel gewonnen',
+      ].join(' · ');
+      li.append(head, details);
+      return li;
+    }));
+    $('btn-new-evening').hidden = !seated;
+    $('btn-to-lobby').hidden = !seated;
+  }
+
+  // ----- Abstimmung (Abbrechen / Abend beenden) -----
+
+  const VOTE_TEXT = { abort: 'das Spiel abbrechen', end: 'den Abend beenden' };
   let voteDeadline = 0;
   let prevVote = null;
   let voteTicker = null;
 
-  function renderAbort(seated) {
-    const vote = state.abortVote;
+  function renderVote(seated) {
+    const vote = state.vote;
     if (prevVote && !vote && state.status === 'running') {
-      toast(state.abortRejectedBy !== null ? `${nameOf(state.abortRejectedBy)} hat den Abbruch abgelehnt.` : 'Abbruch-Abstimmung abgelaufen.');
+      toast(state.voteRejectedBy !== null ? `${nameOf(state.voteRejectedBy)} hat abgelehnt.` : 'Abstimmung abgelaufen.');
     }
     prevVote = vote;
     $('abort-banner').hidden = !vote;
     clearInterval(voteTicker);
     if (!vote) return;
     voteDeadline = Date.now() + vote.remainingMs;
-    const mine = seated && !vote.yes.includes(state.you.seat);
-    $('abort-buttons').hidden = !mine;
+    $('abort-buttons').hidden = !(seated && !vote.yes.includes(state.you.seat));
     const update = () => {
       const secs = Math.max(0, Math.ceil((voteDeadline - Date.now()) / 1000));
       const waiting = vote.waitingFor.map(nameOf).join(', ');
-      $('abort-text').textContent = `${nameOf(vote.by)} möchte das Spiel abbrechen. Noch ${secs} s. Warte auf: ${waiting}.`;
+      $('abort-text').textContent = `${nameOf(vote.by)} möchte ${VOTE_TEXT[vote.kind]}. Noch ${secs} s. Warte auf: ${waiting}.`;
     };
     update();
     voteTicker = setInterval(update, 1000);
@@ -592,10 +641,15 @@
 
   // Abbrechen nur gemeinsam
   $('btn-abort').addEventListener('click', () => {
-    if (confirm('Abbruch vorschlagen? Alle drei müssen innerhalb von 60 Sekunden zustimmen.')) act('game:abort');
+    if (confirm('Abbruch vorschlagen? Alle drei müssen innerhalb von 60 Sekunden zustimmen.')) act('vote:request', { kind: 'abort' });
   });
-  $('btn-abort-yes').addEventListener('click', () => act('game:abort-vote', { agree: true }));
-  $('btn-abort-no').addEventListener('click', () => act('game:abort-vote', { agree: false }));
+  $('btn-end').addEventListener('click', () => {
+    if (confirm('Abend beenden und Wertung zeigen? Alle drei müssen zustimmen.')) act('vote:request', { kind: 'end' });
+  });
+  $('btn-abort-yes').addEventListener('click', () => act('vote:cast', { agree: true }));
+  $('btn-abort-no').addEventListener('click', () => act('vote:cast', { agree: false }));
+  $('btn-new-evening').addEventListener('click', () => act('evening:new'));
+  $('btn-to-lobby').addEventListener('click', () => act('evening:lobby'));
 
   $('btn-leave').addEventListener('click', async () => {
     if (!confirm('Raum verlassen? Dein Platz wird frei.')) return;

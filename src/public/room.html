@@ -144,7 +144,21 @@
 
         <div id="hand" class="hand" aria-label="Deine Karten"></div>
 
-        <button id="btn-abort" class="btn btn-link" hidden>Abbruch vorschlagen</button>
+        <div class="game-footer">
+          <button id="btn-end" class="btn btn-gold-outline" hidden>Abend beenden</button>
+          <button id="btn-abort" class="btn btn-link" hidden>Abbruch vorschlagen</button>
+        </div>
+      </div>
+
+      <!-- Abendwertung -->
+      <div id="summary" class="panel summary" hidden>
+        <h2>Abendwertung</h2>
+        <p id="summary-meta" class="muted"></p>
+        <ol id="summary-players" class="summary-players"></ol>
+        <div class="row">
+          <button id="btn-new-evening" class="btn btn-neon">Neuer Abend</button>
+          <button id="btn-to-lobby" class="btn btn-ghost">Zur Lobby</button>
+        </div>
       </div>
 
       <!-- Punkteliste -->
@@ -154,7 +168,7 @@
           <table class="scores">
             <thead><tr id="scores-head"></tr></thead>
             <tbody id="scores-body"></tbody>
-            <tfoot><tr id="scores-total"></tr></tfoot>
+            <tfoot><tr id="scores-total"></tr><tr id="scores-sf" class="sf"></tr></tfoot>
           </table>
         </div>
       </div>
