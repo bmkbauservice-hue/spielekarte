@@ -60,6 +60,12 @@
 
   socket.on('disconnect', () => setConnection(false));
 
+  // Neue Version auf dem Server (Deploy)? → Seite neu laden. Das Token bleibt im localStorage, der Platz auch.
+  const APP_VERSION = document.querySelector('meta[name="app-version"]').content;
+  socket.on('app:version', (version) => {
+    if (version !== APP_VERSION) location.reload();
+  });
+
   socket.on('room:state', (next) => {
     state = next;
     render();

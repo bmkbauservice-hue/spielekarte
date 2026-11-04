@@ -134,6 +134,8 @@ export function createApp({
   }
 
   io.on('connection', (socket) => {
+    // Nach einem Deploy: alte Tabs merken an der Version, dass sie neu laden müssen
+    socket.emit('app:version', version);
     socket.data.limits = {
       joins: createRateLimiter(joinLimit),
       events: createRateLimiter(eventLimit),
@@ -233,6 +235,7 @@ export function createApp({
     httpServer,
     io,
     registry,
+    version,
     close: () =>
       new Promise((resolve) => {
         clearInterval(sweepTimer);
