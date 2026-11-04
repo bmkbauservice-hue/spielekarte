@@ -11,6 +11,7 @@
   <link rel="preload" href="{{BASE}}/static/fonts/hanken-grotesk-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="{{BASE}}/static/fonts.css?v={{V}}">
   <link rel="stylesheet" href="{{BASE}}/static/style.css?v={{V}}">
+  <script src="{{BASE}}/static/boot.js?v={{V}}"></script>
   <script src="{{BASE}}/socket.io/socket.io.js" defer></script>
   <script src="{{BASE}}/static/fx.js?v={{V}}" defer></script>
   <script src="{{BASE}}/static/room.js?v={{V}}" defer></script>
@@ -179,12 +180,12 @@
         <div id="declare" class="panel declare" hidden>
           <h2 id="declare-title">Welches Spiel spielst du?</h2>
           <div id="declare-types" class="declare-buttons">
-            <button class="btn btn-suit s-kreuz" data-type="suit" data-trump="kreuz">♣&#xFE0E; Kreuz</button>
-            <button class="btn btn-suit s-pik" data-type="suit" data-trump="pik">♠&#xFE0E; Pik</button>
-            <button class="btn btn-suit s-herz" data-type="suit" data-trump="herz">♥&#xFE0E; Herz</button>
-            <button class="btn btn-suit s-karo" data-type="suit" data-trump="karo">♦&#xFE0E; Karo</button>
-            <button class="btn btn-gold" data-type="grand">Grand</button>
-            <button class="btn btn-ghost" data-type="null">Null</button>
+            <button type="button" class="btn btn-choice s-kreuz" data-type="suit" data-trump="kreuz" aria-pressed="false"><span class="sym">♣&#xFE0E;</span> Kreuz</button>
+            <button type="button" class="btn btn-choice s-pik" data-type="suit" data-trump="pik" aria-pressed="false"><span class="sym">♠&#xFE0E;</span> Pik</button>
+            <button type="button" class="btn btn-choice s-herz" data-type="suit" data-trump="herz" aria-pressed="false"><span class="sym">♥&#xFE0E;</span> Herz</button>
+            <button type="button" class="btn btn-choice s-karo" data-type="suit" data-trump="karo" aria-pressed="false"><span class="sym">♦&#xFE0E;</span> Karo</button>
+            <button type="button" class="btn btn-choice" data-type="grand" aria-pressed="false">Grand</button>
+            <button type="button" class="btn btn-choice" data-type="null" aria-pressed="false">Null</button>
           </div>
           <div class="options">
             <label id="opt-schneider-row"><input type="checkbox" id="opt-schneider"> Schneider ansagen</label>

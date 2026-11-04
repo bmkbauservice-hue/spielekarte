@@ -37,13 +37,22 @@
 }
 
 * { box-sizing: border-box; }
+/* Kein Doppeltipp-Zoom beim schnellen Tippen (z. B. zwei Karten drücken). touch-action wird NICHT vererbt
+   und WebKit wertet es am angetippten Element aus – deshalb für alle Elemente. Zwei-Finger-Zoom bleibt erlaubt. */
+*, *::before, *::after { touch-action: manipulation; }
 [hidden] { display: none !important; }
 html, body { margin: 0; }
+html {
+  -webkit-text-size-adjust: 100%; text-size-adjust: 100%; /* iOS soll Schrift nicht selbst vergrößern (Karten!) */
+  overflow-x: hidden; /* Sicherheitsnetz: nichts darf die Seite verbreitern – sonst zoomt iOS-Safari */
+}
 body {
+  min-height: 100vh;   /* Rückfall für ältere Safaris */
   min-height: 100dvh;
   font-family: var(--font-body);
   color: var(--text);
-  background: radial-gradient(120% 70% at 50% 0%, #11402F 0%, var(--bg) 55%, #07211A 100%) fixed, var(--bg);
+  /* Wichtig: KEIN background-attachment "fixed" – das hat in WebKit/iOS das Scrollen blockiert (Reizen-Knöpfe unerreichbar) */
+  background: radial-gradient(120% 70% at 50% 0%, #11402F 0%, var(--bg) 55%, #07211A 100%), var(--bg);
   -webkit-tap-highlight-color: transparent;
 }
 button, input { font: inherit; }
@@ -58,6 +67,7 @@ button, input { font: inherit; }
   gap: 10px;
   padding: calc(10px + env(safe-area-inset-top)) 16px 10px;
   background: rgba(11, 46, 34, 0.86);
+  -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
   border-bottom: 1px solid rgba(232, 199, 102, 0.18);
 }
@@ -202,13 +212,18 @@ input:focus-visible, button:focus-visible { outline: 2px solid var(--mint); outl
 .house-rules small { color: var(--muted); font-size: 13px; }
 
 /* ---------- Karten ---------- */
-/* Eine Karte skaliert über Container-Einheiten (cqw) – dieselbe Komponente für Hand, Tisch und Mini. */
+/* Eine Karte skaliert mit ihrer Breite: --u = 1 % der Kartenbreite, alle Maße innen sind Vielfache davon.
+   (Bewusst ohne aspect-ratio und Container-Einheiten – die kennen ältere iPhones nicht.)
+   WICHTIG: Die Karte selbst behält 16px Schrift. Eine winzige font-size auf einem <button> lässt iOS beim
+   Antippen automatisch hineinzoomen (Safari will "zu kleine" Formular-Elemente lesbar machen). */
 .card {
-  container-type: inline-size;
   position: relative;
   display: block;
   width: var(--card-w, 66px);
-  aspect-ratio: 66 / 96;
+  height: calc(var(--card-w, 66px) * 96 / 66);
+  --u: calc(var(--card-w, 66px) / 100);
+  font-size: 16px;
+  line-height: 1;
   padding: 0;
   border-radius: 8px;
   background: var(--ivory);
@@ -222,19 +237,19 @@ input:focus-visible, button:focus-visible { outline: 2px solid var(--mint); outl
 .card.s-herz { color: var(--suit-red); }
 .card.s-karo { color: var(--suit-orange); }
 .card .idx { position: absolute; top: 5%; left: 9%; display: flex; flex-direction: column; align-items: center; line-height: 1; }
-.card .idx b { font-size: 32cqw; font-weight: 800; letter-spacing: -0.02em; }
-.card .idx i { font-style: normal; font-size: 24cqw; margin-top: 3%; }
-.card .corner-br { position: absolute; right: 9%; bottom: 6%; font-size: 22cqw; line-height: 1; opacity: 0.85; }
-.card .pip { position: absolute; inset: 0; display: grid; place-items: center; padding-top: 18%; font-size: 58cqw; line-height: 1; }
-.card .court { position: absolute; inset: 0; display: grid; place-items: center; padding-top: 16%; }
+.card .idx b { font-size: calc(var(--u) * 32); font-weight: 800; letter-spacing: -0.02em; }
+.card .idx i { font-style: normal; font-size: calc(var(--u) * 24); margin-top: 3%; }
+.card .corner-br { position: absolute; right: 9%; bottom: 6%; font-size: calc(var(--u) * 22); line-height: 1; opacity: 0.85; }
+.card .pip { position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: grid; place-items: center; padding-top: 18%; font-size: calc(var(--u) * 58); line-height: 1; }
+.card .court { position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: grid; place-items: center; padding-top: 16%; }
 .card .court span {
-  width: 54%; aspect-ratio: 44 / 54;
+  width: calc(var(--u) * 54); height: calc(var(--u) * 66);
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   border: 1.5px solid var(--gold-deep); border-radius: 6px;
   background: var(--court-bg);
 }
-.card .court b { font-family: var(--font-display); font-weight: 700; font-size: 40cqw; line-height: 1; color: var(--court-ink); }
-.card .court i { font-style: normal; font-size: 18cqw; line-height: 1; }
+.card .court b { font-family: var(--font-display); font-weight: 700; font-size: calc(var(--u) * 40); line-height: 1; color: var(--court-ink); }
+.card .court i { font-style: normal; font-size: calc(var(--u) * 18); line-height: 1; }
 
 /* Rückseite: dunkelgrün, Rautenmuster, doppelter Goldrahmen, Logo-Oval */
 .card.back {
@@ -245,8 +260,8 @@ input:focus-visible, button:focus-visible { outline: 2px solid var(--mint); outl
   border: 1px solid rgba(232, 199, 102, 0.75);
 }
 .card.back::before, .card.back::after { content: ''; position: absolute; border-radius: 6%; pointer-events: none; }
-.card.back::before { inset: 6%; border: 1.5px solid var(--gold); }
-.card.back::after { inset: 9%; border: 1px solid rgba(232, 199, 102, 0.4); }
+.card.back::before { top: 6%; right: 6%; bottom: 6%; left: 6%; border: 1.5px solid var(--gold); }
+.card.back::after { top: 9%; right: 9%; bottom: 9%; left: 9%; border: 1px solid rgba(232, 199, 102, 0.4); }
 .card.back .back-oval {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
   width: 70%; padding: 10% 6% 8%;
@@ -254,7 +269,7 @@ input:focus-visible, button:focus-visible { outline: 2px solid var(--mint); outl
   background: var(--bg); border: 1px solid rgba(232, 199, 102, 0.55); border-radius: 999px;
 }
 .card.back .back-oval img { width: 100%; height: auto; display: block; }
-.card.back .back-oval span { font-family: var(--font-script); font-size: 16cqw; line-height: 1; color: var(--logo-red); margin-top: -4%; }
+.card.back .back-oval span { font-family: var(--font-script); font-size: calc(var(--u) * 16); line-height: 1; color: var(--logo-red); margin-top: -4%; }
 .card.back.plain .back-oval { display: none; }
 
 .mini-cards { display: inline-flex; gap: 6px; vertical-align: middle; flex-wrap: wrap; justify-content: center; }
@@ -291,14 +306,14 @@ input:focus-visible, button:focus-visible { outline: 2px solid var(--mint); outl
   box-shadow: inset 0 0 50px rgba(0, 0, 0, 0.45), 0 0 24px rgba(62, 242, 192, 0.1);
 }
 .felt::after { /* Bock: dezenter goldener Rand, der leise atmet */
-  content: ''; position: absolute; inset: -4px; border-radius: inherit; pointer-events: none;
+  content: ''; position: absolute; top: -4px; right: -4px; bottom: -4px; left: -4px; border-radius: inherit; pointer-events: none;
   border: 2px solid var(--gold); box-shadow: 0 0 22px rgba(232, 199, 102, 0.45);
   opacity: 0;
 }
 .felt.bock::after { animation: bock-breathe 3.2s ease-in-out infinite; }
 @keyframes bock-breathe { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
 
-.trick { position: absolute; inset: 0; }
+.trick { position: absolute; top: 0; right: 0; bottom: 0; left: 0; pointer-events: none; } /* Stichkarten sind nie antippbar */
 .slot { position: absolute; display: grid; justify-items: center; gap: 4px; transform: translate(-50%, -50%) rotate(var(--rot, 0deg)); }
 .slot .card { --card-w: 64px; box-shadow: 0 8px 16px rgba(0, 0, 0, 0.4); }
 .slot.pos-left { left: 30%; top: 42%; --rot: -6deg; }
@@ -330,7 +345,7 @@ input:focus-visible, button:focus-visible { outline: 2px solid var(--mint); outl
 .status-pill.my-turn p { font-weight: 800; }
 .status-pill.my-turn .dot { background: var(--mint); box-shadow: 0 0 10px var(--mint); }
 .status-pill.my-turn::after, .opp.turn::after {
-  content: ''; position: absolute; inset: -1px; border-radius: inherit; pointer-events: none;
+  content: ''; position: absolute; top: -1px; right: -1px; bottom: -1px; left: -1px; border-radius: inherit; pointer-events: none;
   box-shadow: 0 0 0 2px var(--mint), 0 0 18px var(--mint-glow);
   animation: mint-pulse 1.6s ease-in-out infinite;
 }
@@ -387,10 +402,13 @@ input:focus-visible, button:focus-visible { outline: 2px solid var(--mint); outl
 
 /* ---------- Ansage, Schenken, Ergebnis ---------- */
 .declare-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.btn-suit { background: var(--ivory); color: var(--suit-black); font-size: 17px; }
-.btn-suit.s-herz { color: var(--suit-red); }
-.btn-suit.s-karo { color: var(--suit-orange); }
-.declare-buttons .selected { box-shadow: 0 0 0 3px var(--mint), 0 0 18px var(--mint-glow); }
+.btn-choice { background: var(--surface-2); color: var(--text); border: 1.5px solid rgba(232, 199, 102, 0.35); font-size: 17px; }
+.btn-choice .sym { font-size: 20px; }
+.btn-choice.s-herz .sym { color: #FF5A6E; }   /* helle Varianten für dunklen Grund */
+.btn-choice.s-karo .sym { color: #FFA54D; }
+.btn-choice.selected { background: var(--gold); color: var(--bg); border-color: var(--gold); box-shadow: 0 0 18px rgba(232, 199, 102, 0.45); }
+.btn-choice.selected.s-herz .sym { color: var(--suit-red); }
+.btn-choice.selected.s-karo .sym { color: var(--suit-orange); }
 .options { display: grid; gap: 6px; margin: 14px 0 6px; }
 .options label { display: flex; align-items: center; gap: 12px; min-height: var(--touch); color: var(--text); font-size: 16px; }
 .options input { width: 24px; height: 24px; accent-color: var(--mint); }
@@ -456,7 +474,7 @@ table.scores { width: 100%; border-collapse: collapse; font-size: 14px; font-var
 .sp-details { margin: 4px 0 0; font-size: 13px; color: var(--muted); line-height: 1.45; }
 
 /* ---------- Effekte (fx.js) ---------- */
-.fx-stage { position: fixed; inset: 0; z-index: 50; background: rgba(5, 25, 18, 0.72); cursor: pointer; }
+.fx-stage { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 50; overflow: hidden; background: rgba(5, 25, 18, 0.72); cursor: pointer; }
 .fx-stage .card { position: absolute; --card-w: 64px; }
 .fx-skip { position: absolute; left: 0; right: 0; bottom: calc(26px + env(safe-area-inset-bottom)); margin: 0; text-align: center; font-size: 13px; color: var(--muted); }
 .fx-label {
@@ -464,7 +482,7 @@ table.scores { width: 100%; border-collapse: collapse; font-size: 14px; font-var
   font-family: var(--font-display); font-size: 30px; font-weight: 700; color: var(--gold);
   opacity: 0;
 }
-.fx-sparkle { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+.fx-sparkle { position: absolute; top: 0; right: 0; bottom: 0; left: 0; pointer-events: none; overflow: visible; }
 .fx-spark { position: absolute; left: 50%; top: 40%; width: 8px; height: 8px; margin: -4px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 10px var(--gold); opacity: 0; }
 .fx-spark.mint { background: var(--mint); box-shadow: 0 0 10px var(--mint); }
 
@@ -494,3 +512,14 @@ table.scores { width: 100%; border-collapse: collapse; font-size: 14px; font-var
 
 /* Cormorant zeichnet Ziffern sonst als Mediävalziffern (0 wie „o“, 1 wie „I“) → gleich hohe Ziffern */
 .reizen-value, .result-score, .podium-step .pts, .podium-block, h1, h2, .fx-label { font-variant-numeric: lining-nums tabular-nums; }
+
+/* Globaler Fehlerhinweis (boot.js) – liegt oben, blockiert nichts, Knopf immer erreichbar */
+.crash {
+  position: fixed; left: 12px; right: 12px; top: calc(12px + env(safe-area-inset-top)); z-index: 100;
+  display: grid; gap: 8px; padding: 16px;
+  border-radius: 14px; background: var(--surface); border: 1.5px solid var(--gold);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5); text-align: center;
+}
+.crash p { margin: 0; }
+.crash-title { font-weight: 800; font-size: 17px; color: var(--text-strong); }
+.crash-text { font-size: 14px; color: var(--muted); }
