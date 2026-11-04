@@ -150,9 +150,16 @@
   const SUIT_NAME = { kreuz: 'Kreuz', pik: 'Pik', herz: 'Herz', karo: 'Karo' };
   const RANK_NAME = { B: 'Bube', D: 'Dame', K: 'König', A: 'Ass' };
   const NULL_VALUES = { plain: 23, hand: 35, ouvert: 46, ouvertHand: 59 }; // nur für den Hinweis beim Ansagen
-  const nameOf = (seat) => state.seats[seat]?.name ?? `Platz ${seat + 1}`;
+  /** `wert ?? ersatz` für ältere Safaris (iOS 13 kennt ?? und ?. nicht) */
+  const or = (value, fallback) => (value === null || value === undefined ? fallback : value);
+  const nameOf = (seat) => (state.seats[seat] ? state.seats[seat].name : `Platz ${seat + 1}`);
   const isMe = (seat) => seat === state.you.seat;
-  const FX = window.SkatFX;
+  // Fehlt fx.js (z. B. Ladefehler), läuft das Spiel trotzdem – nur ohne Animationen
+  const noop = () => Promise.resolve();
+  const FX = window.SkatFX || {
+    flyFrom: noop, fadeIn: noop, sweepTo: noop, sparkle: noop, podiumRise: noop, shuffle: noop, cleanup: noop,
+    reduced: () => true, sound: { on: false, rustle: noop, unlock: noop },
+  };
 
   // Zustand nur im Browser (bis der Server ihn bestätigt)
   let handMode = false;            // Alleinspieler hat "Hand spielen" gewählt
@@ -160,13 +167,13 @@
   const discardPick = new Set();   // zum Drücken angetippte Karten
 
   /** Aus wessen Sicht wird der Tisch gezeichnet? Spieler: eigener Platz unten; Zuschauer: Platz 1 unten. */
-  const viewSeat = () => state.you.seat ?? 0;
+  const viewSeat = () => or(state.you.seat, 0);
   /** Position eines Platzes relativ zu mir: links sitzt, wer nach mir dran ist (Uhrzeigersinn). */
   const posOf = (seat) => (seat === viewSeat() ? 'me' : seat === (viewSeat() + 1) % 3 ? 'left' : 'right');
   const seatAt = (pos) => (pos === 'me' ? viewSeat() : pos === 'left' ? (viewSeat() + 1) % 3 : (viewSeat() + 2) % 3);
   /** Bildschirm-Rechteck eines Platzes (für Animationen) */
   const rectOf = (pos) => {
-    const el = pos === 'me' ? (state.game?.hand ? $('hand') : $('me-line')) : $(`opp-${pos}`);
+    const el = pos === 'me' ? (state.game && state.game.hand ? $('hand') : $('me-line')) : $(`opp-${pos}`);
     return el && el.offsetParent ? el.getBoundingClientRect() : null;
   };
 
@@ -231,9 +238,10 @@
       const b = document.createElement('b');
       b.textContent = isMe(game.declarer) ? 'du' : nameOf(game.declarer);
       sub.append('Alleinspieler: ', b, ` · gereizt bis ${game.bid}`);
-      if (game.game?.type === 'null') sub.append(' · kein Trumpf');
-      else if (game.game?.type === 'grand') sub.append(' · nur Buben Trumpf');
-      else if (game.game?.type === 'suit') sub.append(` · ${SUIT_SYMBOL[game.game.trump]} ist Trumpf`);
+      const type = game.game ? game.game.type : null;
+      if (type === 'null') sub.append(' · kein Trumpf');
+      else if (type === 'grand') sub.append(' · nur Buben Trumpf');
+      else if (type === 'suit') sub.append(` · ${SUIT_SYMBOL[game.game.trump]} ist Trumpf`);
     } else {
       sub.textContent = `Geber: ${nameOf(game.dealer)} · ${nameOf(game.forehand)} spielt aus`;
     }
@@ -431,7 +439,7 @@
     }
 
     // Leiste: vergangene grau, aktueller gold
-    const current = b.role === 'listener' ? b.value : b.pendingValue ?? b.value;
+    const current = b.role === 'listener' ? b.value : or(b.pendingValue, b.value);
     const i = Math.max(0, BID_VALUES.indexOf(current));
     const shown = BID_VALUES.slice(Math.max(0, i - 4), Math.max(0, i - 4) + 14);
     $('bid-ladder').replaceChildren(...shown.map((v) => {
@@ -477,10 +485,11 @@
     $('btn-declare-back').hidden = !hand;
 
     for (const btn of $('declare-types').querySelectorAll('button')) {
-      const selected = choice && btn.dataset.type === choice.type && (btn.dataset.trump ?? null) === (choice.trump ?? null);
+      const selected = choice && btn.dataset.type === choice.type && or(btn.dataset.trump, null) === or(choice.trump, null);
       btn.classList.toggle('selected', !!selected);
+      btn.setAttribute('aria-pressed', String(!!selected));
     }
-    const isNull = choice?.type === 'null';
+    const isNull = !!choice && choice.type === 'null';
     // Schneider/Schwarz ansagen nur im Handspiel (nicht Null); Ouvert: Null immer, sonst nur Hand
     $('opt-schneider-row').hidden = !hand || isNull || !choice;
     $('opt-schwarz-row').hidden = !hand || isNull || !choice;
@@ -515,7 +524,7 @@
   function renderHand(game, myTurn, meDeclarer) {
     const hand = $('hand');
     const discarding = game.phase === 'discard' && meDeclarer;
-    const cards = game.hand ?? [];
+    const cards = or(game.hand, []);
     hand.hidden = !game.hand || cards.length === 0; // nach dem letzten Stich keine leere Lücke
     const legal = new Set(game.legal);
     const width = hand.clientWidth || 358;
@@ -543,7 +552,7 @@
       el.classList.toggle('blocked', myTurn && !playable);
       return el;
     }));
-    if (firstDeal) [...hand.children].forEach((el, i) => el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, delay: i * 25, fill: 'backwards' }));
+    if (firstDeal) [...hand.children].forEach((el) => FX.fadeIn(el, 220));
 
     $('hand-hint').textContent = discarding
       ? `${discardPick.size} von 2 zum Drücken gewählt`
@@ -558,7 +567,7 @@
     const [suit, rank] = card.split('-');
     const el = document.createElement(tag);
     el.className = `card s-${suit}`;
-    el.setAttribute('aria-label', `${SUIT_NAME[suit]} ${RANK_NAME[rank] ?? rank}`);
+    el.setAttribute('aria-label', `${SUIT_NAME[suit]} ${or(RANK_NAME[rank], rank)}`);
     const sym = SUIT_SYMBOL[suit];
     const idx = document.createElement('span');
     idx.className = 'idx';
@@ -619,7 +628,7 @@
       order,
       cutter: isMe(game.middle) ? 'Du' : nameOf(game.middle), // abheben: rechts vom Geber
       seed: `${ROOM_ID}:${state.round}`,
-      myCards: game.hand ?? [],
+      myCards: or(game.hand, []),
       makeBack: () => backElement(false),
       makeFront: (card) => cardElement(card),
     });
@@ -655,9 +664,9 @@
       ? `${r.declarerTricks === 0 ? 'Kein Stich' : `${r.declarerTricks} Stich(e)`} für den Alleinspieler`
       : `Alleinspieler: ${r.declarerPoints} Augen\nGegenspieler: ${r.defenderPoints} Augen`
         + (r.schwarz ? ' · Schwarz!' : r.schneider ? ' · Schneider!' : '');
-    $('result-skat').replaceChildren(...(game.skat ?? []).map((c) => cardElement(c)));
+    $('result-skat').replaceChildren(...or(game.skat, []).map((c) => cardElement(c)));
     $('result-discarded-line').hidden = !game.skatTaken;
-    $('result-discarded').replaceChildren(...(game.discarded ?? []).map((c) => cardElement(c)));
+    $('result-discarded').replaceChildren(...or(game.discarded, []).map((c) => cardElement(c)));
     $('btn-next').hidden = !seated;
     $('result-wait').hidden = seated;
     // Spiel gewonnen: kurzes Gold-Funkeln (einmal pro Runde)
@@ -699,7 +708,7 @@
   // ----- Abendwertung -----
 
   function duration(ms) {
-    const min = Math.round(ms / 60_000);
+    const min = Math.round(ms / 60000);
     return min < 60 ? `${min} min` : `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, '0')} min`;
   }
 
@@ -873,7 +882,8 @@
       return li;
     }
 
-    avatar.textContent = Array.from(person.name)[0]?.toUpperCase() ?? '?';
+    const initial = Array.from(person.name)[0];
+    avatar.textContent = initial ? initial.toUpperCase() : '?';
     body.append(...personParts(person, person.id === you.id), label);
     li.append(avatar, body);
     if (person.id === you.id) li.classList.add('me');
