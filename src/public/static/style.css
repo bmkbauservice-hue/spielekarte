@@ -1,0 +1,184 @@
+/* MKDIR Spielekarte – Grundlook (Etappe 1). Feinschliff + Animationen folgen in Etappe 4. */
+
+:root {
+  --bg: #021c14;
+  --felt: #04382a;
+  --felt-light: #0a5a43;
+  --panel: rgba(255, 255, 255, 0.045);
+  --line: rgba(212, 175, 55, 0.22);
+  --gold: #d4af37;
+  --gold-light: #f3d98b;
+  --neon: #39ffb0;
+  --neon-glow: rgba(57, 255, 176, 0.45);
+  --text: #e9f6ef;
+  --muted: #95bfae;
+  --danger: #ff6b8b;
+  --radius: 16px;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+html, body { margin: 0; }
+body {
+  min-height: 100dvh;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(120% 80% at 50% 0%, var(--felt-light) 0%, var(--felt) 45%, var(--bg) 100%) fixed,
+    var(--bg);
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ---------- Kopfzeile ---------- */
+.top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: calc(12px + env(safe-area-inset-top)) 16px 12px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(2, 28, 20, 0.7);
+  backdrop-filter: blur(8px);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+.brand { font-weight: 800; letter-spacing: 0.12em; color: var(--gold); font-size: 0.9rem; }
+.brand span { color: var(--text); font-weight: 400; }
+.room-id { margin-left: auto; font-size: 0.85rem; color: var(--muted); }
+.room-id strong { color: var(--gold-light); letter-spacing: 0.06em; }
+
+.conn { display: flex; align-items: center; gap: 6px; font-size: 0.75rem; color: var(--muted); }
+.conn i { width: 9px; height: 9px; border-radius: 50%; background: var(--danger); }
+.conn[data-state="on"] i { background: var(--neon); box-shadow: 0 0 8px var(--neon-glow); }
+
+/* ---------- Layout ---------- */
+.wrap {
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 16px 16px calc(32px + env(safe-area-inset-bottom));
+  display: grid;
+  gap: 16px;
+}
+#view-room { display: grid; gap: 16px; }
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 20px 16px;
+}
+.center { text-align: center; }
+
+h1 { font-size: 1.5rem; margin: 0 0 8px; color: var(--gold-light); }
+h2 { font-size: 1rem; margin: 0 0 12px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--gold); }
+.muted { color: var(--muted); }
+.small { font-size: 0.8rem; }
+.error { color: var(--danger); min-height: 1.2em; margin: 8px 0 0; }
+.count { color: var(--muted); font-weight: 400; }
+
+/* ---------- Formulare ---------- */
+form { display: grid; gap: 10px; margin-top: 16px; }
+label { font-size: 0.85rem; color: var(--muted); }
+input {
+  font: inherit;
+  font-size: 1.1rem; /* ≥16px verhindert Auto-Zoom auf iOS */
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--text);
+}
+input:focus { outline: 2px solid var(--neon); outline-offset: 1px; }
+
+/* ---------- Buttons ---------- */
+.btn {
+  font: inherit;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px; /* gut mit dem Daumen treffbar */
+  padding: 0 20px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  text-decoration: none;
+  transition: transform 0.08s ease, box-shadow 0.2s ease;
+}
+.btn:active { transform: scale(0.97); }
+.btn-gold { background: linear-gradient(180deg, var(--gold-light), var(--gold)); color: #1d1600; }
+.btn-gold-outline { background: transparent; border-color: var(--gold); color: var(--gold-light); }
+.btn-neon {
+  background: var(--neon);
+  color: #00261a;
+  box-shadow: 0 0 18px var(--neon-glow), 0 0 2px var(--neon);
+  font-size: 1.1rem;
+}
+.btn-ghost { background: rgba(255, 255, 255, 0.06); color: var(--text); border-color: rgba(255, 255, 255, 0.12); }
+.btn-link { background: none; color: var(--muted); text-decoration: underline; min-height: 40px; }
+.btn-small { min-height: 36px; padding: 0 12px; font-size: 0.85rem; }
+
+.actions { display: grid; gap: 10px; margin-top: 16px; }
+.hint { margin: 0; text-align: center; font-size: 0.9rem; }
+.footer-actions { display: grid; gap: 8px; }
+
+/* ---------- Plätze ---------- */
+.seats, .spectators { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.seat, .person {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 56px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.person { min-height: 44px; }
+.seat-no { font-size: 0.75rem; color: var(--gold); text-transform: uppercase; letter-spacing: 0.08em; width: 4.5em; flex: none; }
+.seat-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.seat .btn { margin-left: auto; }
+.seat.free { border-style: dashed; border-color: var(--line); }
+.seat.me, .person.me { border-color: var(--neon); box-shadow: inset 0 0 0 1px var(--neon-glow); }
+.offline .seat-name { opacity: 0.55; }
+
+.badge { font-size: 0.7rem; padding: 2px 8px; border-radius: 999px; flex: none; }
+.badge-me { background: var(--neon); color: #00261a; font-weight: 700; }
+.badge-off { background: rgba(255, 107, 139, 0.15); color: var(--danger); }
+.seat .badge:first-of-type { margin-left: auto; }
+
+/* ---------- Banner + Toast ---------- */
+.banner {
+  display: grid;
+  gap: 4px;
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  border: 1px solid var(--neon);
+  background: rgba(57, 255, 176, 0.08);
+  box-shadow: 0 0 24px rgba(57, 255, 176, 0.15);
+}
+.banner strong { color: var(--neon); }
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(20px + env(safe-area-inset-bottom));
+  transform: translate(-50%, 20px);
+  max-width: calc(100% - 32px);
+  margin: 0;
+  padding: 12px 18px;
+  border-radius: 12px;
+  background: #10241c;
+  border: 1px solid var(--gold);
+  color: var(--text);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}
