@@ -267,10 +267,14 @@ export function createApp({
   };
 }
 
-/** Kurzer Hash über alle statischen Dateien → ändert sich bei jedem Deploy mit geänderten Dateien. */
+/** Kurzer Hash über alle statischen Dateien (inkl. Unterordner) → ändert sich bei jedem Deploy mit geänderten Dateien. */
 function staticVersion() {
   const hash = createHash('sha256');
-  for (const file of readdirSync(staticDir).sort()) hash.update(file).update(readFileSync(join(staticDir, file)));
+  const files = readdirSync(staticDir, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => join(entry.parentPath ?? entry.path, entry.name))
+    .sort();
+  for (const file of files) hash.update(file.slice(staticDir.length)).update(readFileSync(file));
   return hash.digest('hex').slice(0, 10);
 }
 

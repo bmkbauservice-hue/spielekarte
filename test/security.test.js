@@ -115,4 +115,14 @@ describe('Server mit Freigabeliste und Limits', () => {
     assert.equal((await fetch(`${origin}/static/room.js?v=${match[1]}`)).status, 200);
     assert.equal(html.includes('{{'), false, 'keine offenen Platzhalter');
   });
+
+  test('Schriften und Logo werden selbst ausgeliefert (keine Google-Verbindung)', async () => {
+    const html = await (await fetch(`${origin}/k/MUJU01`)).text();
+    assert.equal(/fonts\.googleapis|fonts\.gstatic/.test(html), false);
+    const css = await (await fetch(`${origin}/static/fonts.css`)).text();
+    assert.equal(/googleapis|gstatic|https?:/.test(css), false, 'fonts.css lädt nur lokale Dateien');
+    const font = await fetch(`${origin}/static/fonts/hanken-grotesk-latin-400-normal.woff2`);
+    assert.equal(font.status, 200);
+    assert.equal((await fetch(`${origin}/static/img/logo-mkdir.webp`)).status, 200);
+  });
 });
