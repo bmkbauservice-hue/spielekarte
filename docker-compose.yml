@@ -10,10 +10,17 @@ services:
       BASE_PATH: /spiel
       # Freigeschaltete Karten, z. B. in .env neben dieser Datei: CARD_IDS=MUJU01,TEST01
       CARD_IDS: ${CARD_IDS:-}
+      DB_PATH: /app/data/spielekarte.db
+    volumes:
+      # Spielstände (SQLite) – bleiben bei jedem Deploy erhalten
+      - spielekarte-data:/app/data
     expose:
       - "3000"
     networks:
       - web
+
+volumes:
+  spielekarte-data:
 
 networks:
   web:

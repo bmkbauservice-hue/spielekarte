@@ -6,8 +6,8 @@ Nur zum Spaß – kein Geld, kein Einsatz.
 Jede Karte hat eine feste URL, z. B. `https://mkdirdesign.com/spiel/k/MUJU01`.
 Die Karten-ID (`MUJU01`) ist der Raum: 3 Plätze am Tisch, beliebig viele Zuschauer (max. 20).
 
-**Stand:** Etappe 3b – echtes Skat plus Hausregeln (Kontra/Re, Bockrunden, Schenken).
-Speichern folgt in Etappe 3c, Design in Etappe 4.
+**Stand:** Etappe 3c – echtes Skat mit Hausregeln; Abend, Punkteliste und Bock-Zähler überleben
+Neustarts und Deploys (SQLite). Design folgt in Etappe 4.
 
 ## Spielablauf
 
@@ -104,6 +104,7 @@ npm test
 - `test/room.test.js` – Raum-Logik (Plätze, Runden, Punkteliste, Abstimmungen) ohne Netzwerk
 - `test/server.test.js` – echter Server unter `/spiel` mit simulierten Handys, inkl. kompletter Runde
 - `test/security.test.js` – Freigabeliste, Beitritts-Limit, Cache-Busting
+- `test/storage.test.js` – Schnappschüsse (300 Runden speichern + weiterspielen), SQLite, Sicherung, echter Neustart
 
 ## Konfiguration
 
@@ -113,6 +114,7 @@ npm test
 | `HOST`      | `0.0.0.0` | Netzwerk-Interface                                   |
 | `BASE_PATH` | *(leer)*  | URL-Prefix, z. B. `/spiel`. Im Docker-Image `/spiel` |
 | `CARD_IDS`  | *(leer)*  | Freigeschaltete Karten, z. B. `MUJU01,TEST01`. **Leer = alle erlaubt** (nur lokal sinnvoll) |
+| `DB_PATH`   | *(leer)*  | SQLite-Datei für die Spielstände. **Leer = nichts speichern** (nur Arbeitsspeicher). Im Docker-Image `/app/data/spielekarte.db` |
 | `CARD_IDS_FILE` | *(leer)* | Datei mit Karten-IDs (eine pro Zeile, `#` = Kommentar), wird mit `CARD_IDS` zusammengeführt |
 
 Unbekannte Karten-IDs bekommen eine freundliche Fehlerseite und werden auch beim Socket-Beitritt
@@ -136,6 +138,23 @@ echo 'CARD_IDS=MUJU01,TEST01' > .env      # freigeschaltete Karten (wird nicht c
 docker compose up -d --build
 docker compose logs -f spielekarte
 docker inspect -f '{{.State.Health.Status}}' spielekarte   # → healthy
+```
+
+### Spielstände und Sicherung
+
+Die Spielstände liegen im Docker-Volume `spielekarte-data`. Das Volume bleibt bei jedem Deploy erhalten,
+nur `docker compose down -v` würde es löschen.
+
+```bash
+docker exec spielekarte node scripts/backup.js                 # Sicherung im Volume: /app/data/backup/…
+docker cp spielekarte:/app/data/backup ./spielekarte-backups    # auf den Server kopieren
+docker volume inspect spielekarte-data                          # wo liegt das Volume?
+```
+
+Lokal mit Speichern testen:
+
+```bash
+DB_PATH=./data/spielekarte.db npm run dev    # Server stoppen/starten → Tabs verbinden sich, alles ist noch da
 ```
 
 ### Caddy
@@ -165,9 +184,12 @@ mkdirdesign.com {
   noch Express, deshalb lässt sie sich in Millisekunden testen.
 - **Cache-Busting:** Statische Dateien werden mit `?v=<hash>` eingebunden. Nach einem Deploy
   laden Handys also nie altes JavaScript zu neuem HTML.
-- **Speicher:** Alles liegt im Arbeitsspeicher. Ein Neustart leert alle Räume.
-  Wer in der Lobby länger als 10 Minuten getrennt ist, verliert seinen Platz.
-  Leere Räume werden automatisch gelöscht.
+- **Speichern:** Nach jeder Änderung wird ein Schnappschuss des Raums (Spieler, Plätze, Hausregeln,
+  Punkteliste, Bock-Zähler, laufende Runde mit allen Karten) in SQLite geschrieben. Beim Start werden
+  alle Räume geladen. Nach einem Deploy laden die Tabs neu, melden sich mit ihrem Token an und spielen
+  weiter. Nicht gespeichert werden laufende Abstimmungen – die enden mit einem Neustart.
+- **Aufräumen:** Wer in der Lobby länger als 10 Minuten getrennt ist, verliert seinen Platz
+  (nach einem Neustart beginnt die Frist neu). Verlassene Räume werden nach 6 Stunden gelöscht.
 
 ## Etappen
 
@@ -175,5 +197,5 @@ mkdirdesign.com {
 2. ✅ Skat-Grundspiel: Geben, Stiche mit Bedienpflicht, Trumpf, Augen, Gewinner
 3. ✅ Reizen, Skat/Hand, alle Spielarten, Spielwert, Punkteliste, Abendwertung
 4. ✅ 3b Hausregeln: Kontra/Re, Bockrunden, Schenken
-5. ⏳ 3c Spielstand speichern (SQLite im Docker-Volume)
+5. ✅ 3c Spielstand speichern (SQLite im Docker-Volume)
 6. ⏳ 4 Design + Animationen (Wunschliste: [docs/etappe-4-design.md](docs/etappe-4-design.md))
