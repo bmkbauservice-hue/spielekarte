@@ -98,9 +98,21 @@ describe('CSS läuft auf iOS 13', () => {
       [/container-type\s*:/, 'Container Queries (Safari 16)'],
       [/(^|[\s;{])inset\s*:/, 'inset (Safari 14.1)'],
       [/:has\(/, ':has() (Safari 15.4)'],
+      [/background[^;]*\bfixed\b/, 'background-attachment: fixed (blockiert das Scrollen in iOS-Safari)'],
     ]) {
       assert.equal(pattern.test(css), false, `style.css nutzt ${why}`);
     }
+  });
+
+  test('Karten (sind <button>) haben ≥ 16px Schrift – sonst zoomt iOS beim Antippen hinein', () => {
+    const card = css.match(/\n\.card \{[^}]*\}/)[0];
+    assert.match(card, /font-size:\s*16px/);
+    assert.equal(/font-size:\s*calc\(var\(--card-w/.test(css), false, 'keine winzige font-size aus der Kartenbreite');
+  });
+
+  test('kein Doppeltipp-Zoom (iOS zoomt sonst beim schnellen Tippen hinein)', () => {
+    // touch-action wird nicht vererbt → muss für alle Elemente gelten, nicht nur für html
+    assert.match(css, /\*,\s*\*::before,\s*\*::after\s*\{\s*touch-action:\s*manipulation/);
   });
 
   test('backdrop-filter mit -webkit-Präfix, dvh mit vh-Rückfall', () => {

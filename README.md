@@ -118,6 +118,14 @@ npm test
 - `test/server.test.js` – echter Server unter `/spiel` mit simulierten Handys, inkl. kompletter Runde
 - `test/security.test.js` – Freigabeliste, Beitritts-Limit, Cache-Busting
 - `test/storage.test.js` – Schnappschüsse (300 Runden speichern + weiterspielen), SQLite, Sicherung, echter Neustart
+- `test/browser-compat.test.js` – läuft der Browser-Code auf iOS 13? (Syntax, APIs, CSS, Skript-Reihenfolge)
+
+iPhone-Test im echten WebKit (komplette Runde, Misch-Show, Zoom, Störfälle):
+
+```bash
+npx playwright-core install webkit   # einmalig
+npm run test:iphone                  # iPhone 12 + iPhone SE
+```
 
 ## Konfiguration
 

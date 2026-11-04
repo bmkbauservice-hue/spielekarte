@@ -13,7 +13,8 @@
     "dev": "node --watch src/server.js",
     "test": "node --test",
     "backup": "node scripts/backup.js",
-    "assets": "node scripts/copy-assets.js"
+    "assets": "node scripts/copy-assets.js",
+    "test:iphone": "node e2e/iphone-webkit.mjs \"iPhone 12\" && node e2e/iphone-webkit.mjs \"iPhone SE\""
   },
   "dependencies": {
     "express": "^5.3.0",
@@ -24,6 +25,7 @@
     "@fontsource/hanken-grotesk": "^5.3.0",
     "@fontsource/parisienne": "^5.3.0",
     "acorn": "^8.19.0",
+    "playwright-core": "^1.48.2",
     "socket.io-client": "^4.8.4"
   }
 }

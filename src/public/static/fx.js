@@ -20,6 +20,13 @@
     try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; }
   }
   function mid(r) { return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }
+  function clamp(value, min, max) { return Math.max(min, Math.min(max, value)); }
+  /** Punkt in den sichtbaren Bereich ziehen – nichts darf über den Rand ragen,
+      sonst wird die Seite breiter und iOS-Safari zoomt (Karten werden unerreichbar). */
+  function inView(p) {
+    var w = document.documentElement.clientWidth || window.innerWidth;
+    return { x: clamp(p.x, 40, w - 40), y: p.y };
+  }
 
   /** Promise sicher abwarten – auch wenn es fehlt, undefined ist oder abgebrochen wird */
   function safe(promise) {
@@ -90,9 +97,10 @@
     if (!fromRect || reduced()) return fadeIn(el);
     try {
       var to = el.getBoundingClientRect();
-      var a = mid(fromRect);
+      var a = inView(mid(fromRect));
       var b = mid(to);
-      var scale = to.width ? fromRect.width / to.width : 1;
+      // Startgröße begrenzen: Gegnerkarten starten vom ganzen Gegnerplatz (≈ 180 px) – ohne Grenze wären sie 3× so groß
+      var scale = clamp(to.width ? fromRect.width / to.width : 1, 0.4, 1.3);
       return finished(run(el,
         [{ transform: 'translate(' + (a.x - b.x) + 'px, ' + (a.y - b.y) + 'px) scale(' + scale + ') rotate(' + (o.rotate || 0) + 'deg)' }, { transform: 'none' }],
         { duration: o.duration || 380, easing: EASE }));
@@ -106,12 +114,14 @@
     var delay = (opts && opts.delay) || 900;
     if (!targetRect || !cards || cards.length === 0) return;
     try {
-      var t = mid(targetRect);
+      var t = inView(mid(targetRect));
       cards.forEach(function (el, i) {
         var c = mid(el.getBoundingClientRect());
-        run(el,
+        var anim = run(el,
           [{ transform: 'none', opacity: 1 }, { transform: 'translate(' + (t.x - c.x) + 'px, ' + (t.y - c.y) + 'px) scale(0.35)', opacity: 0 }],
           { duration: reduced() ? 120 : 420, delay: delay + i * 50, easing: 'cubic-bezier(.5,0,.75,0)', fill: 'forwards' });
+        // Danach unsichtbar an den Platz zurück – verschobene Karten würden sonst die Seite verbreitern
+        if (anim) anim.onfinish = function () { el.style.opacity = '0'; try { anim.cancel(); } catch (e) { /* egal */ } };
       });
     } catch (e) { /* egal – die Karten bleiben dann einfach liegen */ }
   }

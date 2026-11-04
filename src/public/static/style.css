@@ -37,15 +37,22 @@
 }
 
 * { box-sizing: border-box; }
+/* Kein Doppeltipp-Zoom beim schnellen Tippen (z. B. zwei Karten drücken). touch-action wird NICHT vererbt
+   und WebKit wertet es am angetippten Element aus – deshalb für alle Elemente. Zwei-Finger-Zoom bleibt erlaubt. */
+*, *::before, *::after { touch-action: manipulation; }
 [hidden] { display: none !important; }
 html, body { margin: 0; }
-html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; } /* iOS soll Schrift nicht selbst vergrößern (Karten!) */
+html {
+  -webkit-text-size-adjust: 100%; text-size-adjust: 100%; /* iOS soll Schrift nicht selbst vergrößern (Karten!) */
+  overflow-x: hidden; /* Sicherheitsnetz: nichts darf die Seite verbreitern – sonst zoomt iOS-Safari */
+}
 body {
   min-height: 100vh;   /* Rückfall für ältere Safaris */
   min-height: 100dvh;
   font-family: var(--font-body);
   color: var(--text);
-  background: radial-gradient(120% 70% at 50% 0%, #11402F 0%, var(--bg) 55%, #07211A 100%) fixed, var(--bg);
+  /* Wichtig: KEIN background-attachment "fixed" – das hat in WebKit/iOS das Scrollen blockiert (Reizen-Knöpfe unerreichbar) */
+  background: radial-gradient(120% 70% at 50% 0%, #11402F 0%, var(--bg) 55%, #07211A 100%), var(--bg);
   -webkit-tap-highlight-color: transparent;
 }
 button, input { font: inherit; }
@@ -205,14 +212,17 @@ input:focus-visible, button:focus-visible { outline: 2px solid var(--mint); outl
 .house-rules small { color: var(--muted); font-size: 13px; }
 
 /* ---------- Karten ---------- */
-/* Eine Karte skaliert mit ihrer Breite: font-size = Breite / 100, also ist 1em = 1 % der Kartenbreite.
-   (Bewusst ohne aspect-ratio und Container-Einheiten – die kennen ältere iPhones nicht.) */
+/* Eine Karte skaliert mit ihrer Breite: --u = 1 % der Kartenbreite, alle Maße innen sind Vielfache davon.
+   (Bewusst ohne aspect-ratio und Container-Einheiten – die kennen ältere iPhones nicht.)
+   WICHTIG: Die Karte selbst behält 16px Schrift. Eine winzige font-size auf einem <button> lässt iOS beim
+   Antippen automatisch hineinzoomen (Safari will "zu kleine" Formular-Elemente lesbar machen). */
 .card {
   position: relative;
   display: block;
   width: var(--card-w, 66px);
   height: calc(var(--card-w, 66px) * 96 / 66);
-  font-size: calc(var(--card-w, 66px) / 100);
+  --u: calc(var(--card-w, 66px) / 100);
+  font-size: 16px;
   line-height: 1;
   padding: 0;
   border-radius: 8px;
@@ -227,19 +237,19 @@ input:focus-visible, button:focus-visible { outline: 2px solid var(--mint); outl
 .card.s-herz { color: var(--suit-red); }
 .card.s-karo { color: var(--suit-orange); }
 .card .idx { position: absolute; top: 5%; left: 9%; display: flex; flex-direction: column; align-items: center; line-height: 1; }
-.card .idx b { font-size: 32em; font-weight: 800; letter-spacing: -0.02em; }
-.card .idx i { font-style: normal; font-size: 24em; margin-top: 3%; }
-.card .corner-br { position: absolute; right: 9%; bottom: 6%; font-size: 22em; line-height: 1; opacity: 0.85; }
-.card .pip { position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: grid; place-items: center; padding-top: 18%; font-size: 58em; line-height: 1; }
+.card .idx b { font-size: calc(var(--u) * 32); font-weight: 800; letter-spacing: -0.02em; }
+.card .idx i { font-style: normal; font-size: calc(var(--u) * 24); margin-top: 3%; }
+.card .corner-br { position: absolute; right: 9%; bottom: 6%; font-size: calc(var(--u) * 22); line-height: 1; opacity: 0.85; }
+.card .pip { position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: grid; place-items: center; padding-top: 18%; font-size: calc(var(--u) * 58); line-height: 1; }
 .card .court { position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: grid; place-items: center; padding-top: 16%; }
 .card .court span {
-  width: 54em; height: 66em;
+  width: calc(var(--u) * 54); height: calc(var(--u) * 66);
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   border: 1.5px solid var(--gold-deep); border-radius: 6px;
   background: var(--court-bg);
 }
-.card .court b { font-family: var(--font-display); font-weight: 700; font-size: 40em; line-height: 1; color: var(--court-ink); }
-.card .court i { font-style: normal; font-size: 18em; line-height: 1; }
+.card .court b { font-family: var(--font-display); font-weight: 700; font-size: calc(var(--u) * 40); line-height: 1; color: var(--court-ink); }
+.card .court i { font-style: normal; font-size: calc(var(--u) * 18); line-height: 1; }
 
 /* Rückseite: dunkelgrün, Rautenmuster, doppelter Goldrahmen, Logo-Oval */
 .card.back {
@@ -259,7 +269,7 @@ input:focus-visible, button:focus-visible { outline: 2px solid var(--mint); outl
   background: var(--bg); border: 1px solid rgba(232, 199, 102, 0.55); border-radius: 999px;
 }
 .card.back .back-oval img { width: 100%; height: auto; display: block; }
-.card.back .back-oval span { font-family: var(--font-script); font-size: 16em; line-height: 1; color: var(--logo-red); margin-top: -4%; }
+.card.back .back-oval span { font-family: var(--font-script); font-size: calc(var(--u) * 16); line-height: 1; color: var(--logo-red); margin-top: -4%; }
 .card.back.plain .back-oval { display: none; }
 
 .mini-cards { display: inline-flex; gap: 6px; vertical-align: middle; flex-wrap: wrap; justify-content: center; }
@@ -303,7 +313,7 @@ input:focus-visible, button:focus-visible { outline: 2px solid var(--mint); outl
 .felt.bock::after { animation: bock-breathe 3.2s ease-in-out infinite; }
 @keyframes bock-breathe { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
 
-.trick { position: absolute; top: 0; right: 0; bottom: 0; left: 0; }
+.trick { position: absolute; top: 0; right: 0; bottom: 0; left: 0; pointer-events: none; } /* Stichkarten sind nie antippbar */
 .slot { position: absolute; display: grid; justify-items: center; gap: 4px; transform: translate(-50%, -50%) rotate(var(--rot, 0deg)); }
 .slot .card { --card-w: 64px; box-shadow: 0 8px 16px rgba(0, 0, 0, 0.4); }
 .slot.pos-left { left: 30%; top: 42%; --rot: -6deg; }
@@ -464,7 +474,7 @@ table.scores { width: 100%; border-collapse: collapse; font-size: 14px; font-var
 .sp-details { margin: 4px 0 0; font-size: 13px; color: var(--muted); line-height: 1.45; }
 
 /* ---------- Effekte (fx.js) ---------- */
-.fx-stage { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 50; background: rgba(5, 25, 18, 0.72); cursor: pointer; }
+.fx-stage { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 50; overflow: hidden; background: rgba(5, 25, 18, 0.72); cursor: pointer; }
 .fx-stage .card { position: absolute; --card-w: 64px; }
 .fx-skip { position: absolute; left: 0; right: 0; bottom: calc(26px + env(safe-area-inset-bottom)); margin: 0; text-align: center; font-size: 13px; color: var(--muted); }
 .fx-label {

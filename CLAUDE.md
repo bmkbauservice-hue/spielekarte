@@ -116,3 +116,16 @@ Immer nur eine Etappe gleichzeitig; jede einzeln testbar.
 - Animationen nur mit `transform`/`opacity`, über `fx.js`; Tisch/Hand nur bei geändertem Schlüssel neu zeichnen,
   sonst würgt jede Server-Nachricht laufende Animationen ab.
 - Cormorant-Ziffern brauchen `font-variant-numeric: lining-nums` (sonst 0 wie „o“, 1 wie „I“).
+
+## iPhone / ältere Safaris (Ziel: iOS 13+) – Lehren aus dem iPhone-Bugfix
+
+- Browser-Code nur ES2019: kein `?.`, `??`, `??=`, keine Zahlen mit `_`. Fehlende APIs nur mit Polyfill in `boot.js`.
+  `npm test` prüft das (test/browser-compat.test.js, per acorn).
+- `boot.js` lädt als erstes Skript (ohne defer, ES5): Polyfills + globaler Fehlerhinweis „neu laden“.
+- CSS ohne `aspect-ratio`, Container-Einheiten (`cqw`), `inset`, `:has()`; `dvh` nur mit `vh`-Zeile davor.
+- KEIN `background-attachment: fixed` – hat in WebKit das Scrollen komplett blockiert.
+- `<button>` nie mit winziger Schrift (Karten: 16px + `--u` für Innenmaße) – sonst zoomt iOS beim Antippen.
+- Nichts darf über den Bildschirmrand ragen (auch nicht während Animationen) – sonst zoomt iOS-Safari schrittweise.
+- `touch-action: manipulation` für alle Elemente (kein Doppeltipp-Zoom).
+- Overlays dürfen nie blockieren: Misch-Bühne endet bei Antippen, Fehler, unsichtbarer Seite und spätestens nach 5 s.
+- Vor Änderungen an Oberfläche/Animationen: `npm run test:iphone` (Playwright WebKit, iPhone 12 + SE).
