@@ -2,7 +2,8 @@
 // Reine Funktionen – kein eigener Zähler, der aus dem Takt geraten könnte.
 //
 // Eine Zeile (siehe Room.recordScore):
-//   { round, declarer: 0|1|2|null, label, bid, value, score, won: true|false|null }
+//   { round, declarer: 0|1|2|null, label, bid, value, score, won: true|false|null,
+//     bock: boolean, kontraBy: 0|1|2|null, re: boolean, gift: boolean }
 //   declarer === null → eingepasst
 
 export const PLAYERS = 3;
@@ -59,6 +60,16 @@ export function summarizeEvening({ rows, names, startedAt, endedAt }) {
       won: won.length,
       lost: own.length - won.length,
       best: best ? { label: best.label, value: best.value, round: best.round } : null,
+      // Hausregeln: Kontra "gewonnen" = Alleinspieler hat verloren; Re "gewonnen" = Alleinspieler hat gewonnen
+      kontra: {
+        said: rows.filter((r) => r.kontraBy === seat).length,
+        won: rows.filter((r) => r.kontraBy === seat && r.won === false).length,
+      },
+      re: {
+        said: own.filter((r) => r.re).length,
+        won: own.filter((r) => r.re && r.won).length,
+      },
+      bockGames: own.filter((r) => r.bock).length,
     };
   });
 
@@ -66,6 +77,7 @@ export function summarizeEvening({ rows, names, startedAt, endedAt }) {
     players,
     games: rows.length,
     passed: rows.filter((r) => r.declarer === null).length,
+    bockGames: rows.filter((r) => r.bock).length,
     startedAt,
     endedAt,
     durationMs: Math.max(0, endedAt - startedAt),

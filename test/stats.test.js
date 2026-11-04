@@ -76,3 +76,26 @@ describe('Abendwertung', () => {
     assert.equal(total, ROWS.reduce((s, r) => s + r.score, 0));
   });
 });
+
+describe('Abendwertung – Hausregeln', () => {
+  const rows = [
+    { ...lost(1, 0, 'Grand', 48), kontraBy: 1, re: false, bock: false, gift: false },   // Ben: Kontra gewonnen
+    { ...won(2, 0, 'Herz', 20), kontraBy: 2, re: true, bock: true, gift: false },      // Anna: Re gewonnen (Bock)
+    { ...passed(3), bock: true, kontraBy: null, re: false, gift: false },
+    { ...won(4, 1, 'Pik', 22), kontraBy: null, re: false, bock: true, gift: true },
+  ];
+  const s = summarizeEvening({ rows, names: NAMES, startedAt: 0, endedAt: 0 });
+
+  test('Kontra gesagt/gewonnen pro Gegenspieler', () => {
+    assert.deepEqual(s.players.map((p) => p.kontra), [{ said: 0, won: 0 }, { said: 1, won: 1 }, { said: 1, won: 0 }]);
+  });
+
+  test('Re gesagt/gewonnen pro Alleinspieler', () => {
+    assert.deepEqual(s.players.map((p) => p.re), [{ said: 1, won: 1 }, { said: 0, won: 0 }, { said: 0, won: 0 }]);
+  });
+
+  test('Bock-Spiele pro Alleinspieler und gesamt (eingepasste zählen mit)', () => {
+    assert.deepEqual(s.players.map((p) => p.bockGames), [1, 1, 0]);
+    assert.equal(s.bockGames, 3);
+  });
+});

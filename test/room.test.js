@@ -301,7 +301,7 @@ describe('Room – Skat-Runde', () => {
     room.bid(tokens[0], 'pass');
     room.bid(tokens[1], 'pass');
     assert.equal(room.game.phase, 'passed');
-    assert.deepEqual(room.scores[1], { round: 2, declarer: null, label: 'eingepasst', bid: null, value: 0, score: 0, won: null });
+    assert.deepEqual(room.scores[1], { round: 2, declarer: null, label: 'eingepasst', bid: null, value: 0, score: 0, won: null, bock: false, kontraBy: null, re: false, gift: false });
 
     // Summen
     const totals = room.stateFor(tokens[2]).scores.totals;
@@ -497,5 +497,118 @@ describe('Room – Abend beenden und Abendwertung', () => {
     assert.equal(totals[0], r.score);
     assert.equal(seegerFabian[0], r.won ? r.score + 50 : r.score - 50);
     assert.equal(seegerFabian[1], r.won ? 0 : 40);
+  });
+});
+
+describe('Room – Hausregeln und Bockrunden', () => {
+  const RULES = { kontra: true, bock: true, schenken: true };
+
+  function table(rules = RULES) {
+    const { room, players } = roomWith(4);
+    const t = players.map((p) => p.token);
+    room.setHouseRules(t[0], rules);
+    room.start(t[0]);
+    return { room, t };
+  }
+
+  /** Vorhand wird Alleinspieler (Grand Hand); optional Kontra; Ergebnis per `forceWin` steuern */
+  function round(room, t, { kontra = false, forceWin } = {}) {
+    const g = room.game;
+    room.bid(t[g.middle], 'pass');
+    room.bid(t[g.rear], 'pass');
+    room.bid(t[g.forehand], 'bid');
+    room.declare(t[g.forehand], { type: 'grand' });
+    if (room.game.phase === 'gift') room.offerGift(t[g.middle], false);
+    if (kontra) room.sayKontra(t[g.middle]);
+    while (room.game.phase === 'playing') room.playCard(t[room.game.turn], room.game.legalFor(room.game.turn)[0]);
+    if (forceWin !== undefined) {
+      // Ergebnis für den Test festlegen (Kartenglück wollen wir hier nicht testen)
+      const row = room.scores.at(-1);
+      room.scores.pop();
+      room.recordedGame = null;
+      room.bockRemaining = bockBefore;
+      g.result = { ...g.result, won: forceWin };
+      room.recordScore();
+      return row;
+    }
+    return room.scores.at(-1);
+  }
+  let bockBefore = 0;
+  const playRound = (room, t, opts) => { bockBefore = room.bockRemaining; return round(room, t, opts); };
+  function passRound(room, t) {
+    const g = room.game;
+    room.bid(t[g.middle], 'pass');
+    room.bid(t[g.rear], 'pass');
+    room.bid(t[g.forehand], 'pass');
+  }
+
+  test('Hausregeln nur in der Lobby und nur von Spielern am Tisch einstellbar', () => {
+    const { room, players } = roomWith(4);
+    const t = players.map((p) => p.token);
+    throwsCode(() => room.setHouseRules(t[3], RULES), 'NUR_SPIELER');
+    room.setHouseRules(t[0], { schenken: true, bock: true });
+    assert.deepEqual(room.stateFor(t[3]).houseRules, { kontra: false, bock: false, schenken: true });
+    room.start(t[0]);
+    throwsCode(() => room.setHouseRules(t[0], RULES), 'SPIEL_LAEUFT');
+    assert.equal(room.game.rules.schenken, true, 'die Runde kennt die Hausregeln');
+  });
+
+  test('Kontra und Alleinspieler verliert → 9 Bock-Spiele; die nächste Runde ist Bock', () => {
+    const { room, t } = table();
+    playRound(room, t, { kontra: true, forceWin: false });
+    assert.equal(room.bockRemaining, 9);
+    room.nextRound(t[0]);
+    assert.equal(room.game.bock, true);
+    assert.equal(room.stateFor(t[3]).bockRemaining, 9);
+  });
+
+  test('Re/Kontra gewonnen → kein Bock', () => {
+    const { room, t } = table();
+    playRound(room, t, { kontra: true, forceWin: true });
+    assert.equal(room.bockRemaining, 0);
+  });
+
+  test('Bock-Spiele werden verbraucht – auch eingepasste; zweiter Auslöser hängt 9 an', () => {
+    const { room, t } = table();
+    playRound(room, t, { kontra: true, forceWin: false }); // → 9
+    room.nextRound(t[0]);
+    passRound(room, t); // eingepasst zählt als gespielt → 8
+    assert.equal(room.bockRemaining, 8);
+    assert.equal(room.scores.at(-1).bock, true, 'eingepasstes Bock-Spiel ist markiert');
+    room.nextRound(t[0]);
+    playRound(room, t, { kontra: true, forceWin: false }); // verbraucht eins, +9 → 16
+    assert.equal(room.bockRemaining, 16);
+    assert.equal(room.scores.at(-1).bock, true);
+  });
+
+  test('ohne Hausregel Bock gibt es keine Bock-Spiele', () => {
+    const { room, t } = table({ kontra: true, bock: false });
+    playRound(room, t, { kontra: true, forceWin: false });
+    assert.equal(room.bockRemaining, 0);
+  });
+
+  test('neuer Abend setzt den Bock-Zähler zurück', () => {
+    const { room, t } = table();
+    playRound(room, t, { kontra: true, forceWin: false });
+    for (const token of t.slice(0, 3)) room.requestVote(token, 'end');
+    assert.equal(room.summary.bockGames, 0);
+    room.start(t[0]);
+    assert.equal(room.bockRemaining, 0);
+  });
+
+  test('Schenken über den Raum: beide schenken, Alleinspieler nimmt an → Eintrag mit gift', () => {
+    const { room, t } = table();
+    const g = room.game;
+    room.bid(t[g.middle], 'pass');
+    room.bid(t[g.rear], 'pass');
+    room.bid(t[g.forehand], 'bid');
+    room.declare(t[g.forehand], { type: 'grand' });
+    room.offerGift(t[g.middle], true);
+    room.offerGift(t[g.rear], true);
+    room.answerGift(t[g.forehand], true);
+    const row = room.scores.at(-1);
+    assert.equal(row.gift, true);
+    assert.equal(row.won, true);
+    throwsCode(() => room.offerGift(t[3], true), 'NUR_SPIELER');
   });
 });
