@@ -7,14 +7,20 @@
 //   'skat'      Alleinspieler: Skat aufnehmen ODER direkt ansagen (= Handspiel)
 //   'discard'   Alleinspieler hat 12 Karten und drückt 2
 //   'declaring' Alleinspieler sagt an (nach dem Drücken, kein Handspiel)
+//   'gift'      Hausregel Schenken: Gegenspieler bieten an, Alleinspieler nimmt an oder lehnt ab
 //   'playing'   10 Stiche (Null endet vorzeitig, sobald der Alleinspieler einen Stich bekommt)
 //   'finished'  Abrechnung steht fest
+//
+// Hausregeln (house-rules.js) sind pro Tisch einschaltbar: Kontra/Re, Bock, Schenken.
 
 import { createDeck, shuffle, sumPoints, isCard } from './cards.js';
 import { legalCards, trickWinner, sortHand } from './rules.js';
 import { Bidding } from './bidding.js';
 import { normalizeGame, nullValue, scoreGame, gameLabel } from './scoring.js';
 import { GameError } from './errors.js';
+import {
+  DEFAULT_HOUSE_RULES, normalizeHouseRules, applyFactors, canSayKontra, canSayRe, giftAllowed, giftValue,
+} from './house-rules.js';
 
 export { GameError };
 export const PLAYERS = 3;
@@ -24,10 +30,12 @@ const next = (seat) => (seat + 1) % PLAYERS;
 
 export class SkatGame {
   /**
-   * @param {{ dealer?: number, deck?: string[] }} [options]
+   * @param {{ dealer?: number, deck?: string[], houseRules?: object, bock?: boolean }} [options]
    *   `deck`: feste Kartenreihenfolge für Tests. Ohne → frisch gemischt (crypto).
+   *   `houseRules`: { kontra, bock, schenken } – Standard: alles aus
+   *   `bock`: diese Runde ist ein Bock-Spiel (×2) – entscheidet der Raum anhand seines Bock-Zählers
    */
-  constructor({ dealer = 0, deck } = {}) {
+  constructor({ dealer = 0, deck, houseRules = DEFAULT_HOUSE_RULES, bock = false } = {}) {
     const cards = deck ? checkDeck(deck) : shuffle(createDeck());
 
     this.dealer = dealer;
@@ -57,7 +65,16 @@ export class SkatGame {
     this.lastTrick = null;
     this.won = [[], [], []];
     this.tricksWon = [0, 0, 0];
+    this.cardsPlayed = [0, 0, 0];
     this.result = null;
+
+    // Hausregeln
+    this.rules = normalizeHouseRules(houseRules);
+    this.bock = bock === true;
+    this.kontraBy = null; // Platz des Gegenspielers, der Kontra gesagt hat
+    this.re = false; // Achtung: Methode heißt sayRe(), nicht re()
+    /** Schenken: { offers: [true|false|null ×3], declinedBy, awaitingDeclarer, refused } */
+    this.gift = null;
   }
 
   // ---------- Reizen ----------
@@ -126,10 +143,99 @@ export class SkatGame {
     this.startPlay();
   }
 
-  /** Übergang Ansage → Ausspielen. Hier können später Hausregeln (z. B. Schenken) einhaken. */
+  /** Übergang Ansage → Ausspielen. Mit Hausregel Schenken kommt erst die Phase 'gift'. */
   startPlay() {
+    if (giftAllowed(this.rules, this.game)) {
+      this.phase = 'gift';
+      this.turn = null; // beide Gegenspieler dürfen gleichzeitig antworten
+      this.gift = { offers: [null, null, null], declinedBy: null, awaitingDeclarer: false, refused: false };
+      return;
+    }
+    this.beginTricks();
+  }
+
+  beginTricks() {
     this.phase = 'playing';
     this.turn = this.forehand;
+  }
+
+  // ---------- Hausregel Schenken ----------
+
+  /** Gegenspieler: schenken (yes = true) oder nicht. Lehnt einer ab → normal spielen. */
+  offerGift(seat, yes) {
+    this.requirePhase('gift');
+    if (seat === this.declarer) throw new GameError('NUR_GEGENSPIELER', 'Schenken können nur die Gegenspieler.');
+    if (this.gift.awaitingDeclarer || this.gift.offers[seat] !== null) {
+      throw new GameError('SCHON_ENTSCHIEDEN', 'Du hast schon entschieden.');
+    }
+    this.gift.offers[seat] = yes === true;
+    if (yes !== true) {
+      this.gift.declinedBy = seat;
+      return this.beginTricks();
+    }
+    const defenders = [0, 1, 2].filter((s) => s !== this.declarer);
+    if (defenders.every((s) => this.gift.offers[s] === true)) {
+      this.gift.awaitingDeclarer = true;
+      this.turn = this.declarer;
+    }
+  }
+
+  /** Alleinspieler: Geschenk annehmen (sofort gewonnen) oder ablehnen (Schneider wird Pflicht). */
+  answerGift(seat, accept) {
+    this.requirePhase('gift');
+    if (!this.gift.awaitingDeclarer) throw new GameError('KEIN_GESCHENK', 'Es wurde (noch) nichts geschenkt.');
+    if (seat !== this.declarer) throw new GameError('NICHT_ALLEINSPIELER', 'Das entscheidet der Alleinspieler.');
+    if (accept === true) return this.finishGift();
+    // Abgelehnt: Schneider wird Pflicht – gewertet wie "Schneider angesagt"
+    this.gift.refused = true;
+    this.game = { ...this.game, schneiderAnnounced: true, giftRefused: true };
+    this.beginTricks();
+  }
+
+  finishGift() {
+    const gv = giftValue({ game: this.game, bid: this.bidValue, declarerCards: this.declarerCards });
+    const result = {
+      won: true,
+      value: gv.value,
+      score: gv.value,
+      bid: this.bidValue,
+      declarerPoints: null,
+      defenderPoints: null,
+      declarerTricks: 0,
+      overbid: false,
+      levels: gv.levels,
+      multiplier: gv.multiplier,
+      base: gv.base,
+      schneider: false,
+      schwarz: false,
+      reason: null,
+      raisedToBid: gv.raisedToBid,
+    };
+    this.result = { ...this.withHouseRules(result), label: gameLabel(this.game), skatPoints: 0, gift: true };
+    this.phase = 'finished';
+    this.turn = null;
+  }
+
+  // ---------- Hausregel Kontra / Re ----------
+
+  houseState() {
+    return { rules: this.rules, phase: this.phase, declarer: this.declarer, kontraBy: this.kontraBy, re: this.re, cardsPlayed: this.cardsPlayed };
+  }
+
+  sayKontra(seat) {
+    if (!canSayKontra(this.houseState(), seat)) throw new GameError('KEIN_KONTRA', 'Kontra geht nur als Gegenspieler vor deiner ersten Karte.');
+    this.kontraBy = seat;
+  }
+
+  sayRe(seat) {
+    if (!canSayRe(this.houseState(), seat)) throw new GameError('KEIN_RE', 'Re geht nur als Alleinspieler nach Kontra, vor deiner ersten Karte.');
+    this.re = true;
+  }
+
+  /** Kontra/Re und Bock auf das Ergebnis anwenden */
+  withHouseRules(result) {
+    const flags = { kontra: this.kontraBy !== null, re: this.re, bock: this.bock };
+    return { ...applyFactors(result, flags), kontraBy: this.kontraBy, re: this.re, bock: this.bock };
   }
 
   // ---------- Stiche ----------
@@ -151,6 +257,7 @@ export class SkatGame {
     }
 
     this.hands[seat] = this.hands[seat].filter((c) => c !== card);
+    this.cardsPlayed[seat]++;
     this.trick.push({ seat, card });
 
     if (this.trick.length < PLAYERS) {
@@ -175,17 +282,14 @@ export class SkatGame {
     // Im Handspiel zählt der Skat, sonst die gedrückten Karten – beides für den Alleinspieler
     const pile = this.skatTaken ? this.discarded : this.skat;
     const skatPoints = sumPoints(pile);
-    this.result = {
-      ...scoreGame({
-        game: this.game,
-        bid: this.bidValue,
-        declarerCards: this.declarerCards,
-        declarerPoints: sumPoints(this.won[this.declarer]) + skatPoints,
-        declarerTricks: this.tricksWon[this.declarer],
-      }),
-      label: gameLabel(this.game),
-      skatPoints,
-    };
+    const scored = scoreGame({
+      game: this.game,
+      bid: this.bidValue,
+      declarerCards: this.declarerCards,
+      declarerPoints: sumPoints(this.won[this.declarer]) + skatPoints,
+      declarerTricks: this.tricksWon[this.declarer],
+    });
+    this.result = { ...this.withHouseRules(scored), label: gameLabel(this.game), skatPoints, gift: false };
     this.phase = 'finished';
     this.turn = null;
   }
@@ -226,7 +330,17 @@ export class SkatGame {
       tricksWon: [...this.tricksWon],
       discarded: this.discarded && (isDeclarer || finished) ? [...this.discarded] : null,
       skat: finished ? [...this.skat] : null,
-      result: finished ? { ...this.result, levels: this.result.levels.map((l) => ({ ...l })) } : null,
+      result: finished
+        ? { ...this.result, levels: this.result.levels.map((l) => ({ ...l })), factors: this.result.factors.map((f) => ({ ...f })) }
+        : null,
+      // Hausregeln
+      rules: { ...this.rules },
+      bock: this.bock,
+      kontraBy: this.kontraBy,
+      re: this.re,
+      canKontra: isPlayer && canSayKontra(this.houseState(), seat),
+      canRe: isPlayer && canSayRe(this.houseState(), seat),
+      gift: this.gift ? { ...this.gift, offers: [...this.gift.offers] } : null,
     };
   }
 
