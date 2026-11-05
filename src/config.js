@@ -1,6 +1,7 @@
 // Konfiguration aus Umgebungsvariablen (12-Factor-Prinzip: gleiches Image, andere Umgebung).
 
 import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { normalizeRoomId } from './rooms/room.js';
 
 /** "/spiel/" → "/spiel", "" oder "/" → "" (kein Prefix). Ungültig → Fehler beim Start. */
@@ -37,6 +38,7 @@ export function loadConfig(env = process.env, { readFile = readFileSync } = {}) 
   if (env.CARD_IDS_FILE) {
     for (const id of parseCardIds(readFile(env.CARD_IDS_FILE, 'utf8'))) cardIds.add(id);
   }
+  const dbPath = (env.DB_PATH ?? '').trim();
   return {
     port: Number(env.PORT) || 3000,
     host: env.HOST || '0.0.0.0',
@@ -44,6 +46,8 @@ export function loadConfig(env = process.env, { readFile = readFileSync } = {}) 
     /** leer = alle Karten-IDs erlaubt (lokal/Tests) */
     cardIds,
     /** SQLite-Datei; leer = nichts speichern (nur Arbeitsspeicher) */
-    dbPath: (env.DB_PATH ?? '').trim(),
+    dbPath,
+    /** Ordner für Sprachnachrichten: VOICE_DIR, sonst neben der Datenbank; beides leer = Temp-Ordner */
+    voiceDir: (env.VOICE_DIR ?? '').trim() || (dbPath ? join(dirname(dbPath), 'voice') : ''),
   };
 }

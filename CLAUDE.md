@@ -37,6 +37,8 @@ npm install          # Abhängigkeiten
 npm run dev          # lokal starten (http://localhost:3000, ohne Prefix), Neustart bei Änderungen
 BASE_PATH=/spiel npm start   # wie in Produktion mit Prefix
 npm test             # alle Tests (node:test)
+npm run test:iphone  # WebKit: iPhone 12 + SE
+npm run test:voice   # Sprachnachrichten Chrome <-> WebKit (ca. 1 min)
 ```
 
 ## Struktur
@@ -57,10 +59,13 @@ src/
   game/game.js       SkatGame: eine Runde (reizen → Skat/Hand → drücken → ansagen → Stiche), viewFor(seat)
   rooms/room.js      Reine Raum-Logik (Plätze, Tokens, Start, Runden) – ohne Netzwerk, gut testbar
   rooms/registry.js  Verwaltet alle Räume (anlegen, aufräumen, laden/speichern)
+  rooms/chat.js      Chat-Verlauf + Textprüfung – reine Logik
   storage/sqlite-store.js  SQLite: eine Zeile pro Raum (JSON-Schnappschuss), Migrationen, Sicherung
+  storage/voice-store.js   Sprachnachrichten als Dateien (bewusst nicht in SQLite/Sicherung)
 scripts/backup.js    Datensicherung (VACUUM INTO)
   public/            Browser-Dateien (HTML, CSS, JS)
   public/static/fx.js  Animationen (window.SkatFX) – nur Show, nie Spielzustand
+  public/static/chat.js  Chat + Sprachnachrichten im Browser (window.SkatChat)
   public/static/fonts/, img/  selbst gehostete Schriften + Logo (npm run assets)
 test/                Tests mit node:test
 ```
@@ -78,13 +83,14 @@ test/                Tests mit node:test
      Kontra/Re, Bockrunden, Schenken. Danach Abendwertung um Kontra/Re/Bock ergänzen.
    - 3c **Speichern** (z. B. SQLite im Docker-Volume): Abend, Punkteliste, Bock-Zähler überleben Deploys.
 4. **Design + Animationen** – Wunschliste in `docs/etappe-4-design.md`.
+5. **Zweimal tippen, Text-Chat, Sprachnachrichten** – Sprachnachrichten wie WhatsApp, kein Live-Funk.
 
 Immer nur eine Etappe gleichzeitig; jede einzeln testbar.
 
 ## Stand
 
-- Etappe 1–3c live (Spielraum, Skat, Hausregeln, SQLite).
-- Etappe 4 (Design + Animationen): PR offen (Branch `etappe-4-design`).
+- Etappe 1–4 live (Spielraum, Skat, Hausregeln, SQLite, Design).
+- Etappe 5: PR offen (Branch `etappe-5-chat`). Vor dem Einsatz: Prüfliste „echte Handys“ in der README.
 - Ideen danach: Spielvideos/Replay, mehrere Tische pro Abend, Statistik über Abende hinweg.
 
 ## Entscheidungen (vom Inhaber bestätigt)
@@ -106,7 +112,10 @@ Immer nur eine Etappe gleichzeitig; jede einzeln testbar.
 - Socket-Ereignisse: `game:bid {action}`, `game:skat`, `game:discard {cards}`, `game:declare {…}`,
   `game:play {card}`, `game:next`, `vote:request {kind: abort|end}`, `vote:cast {agree}`,
   `evening:new`, `evening:lobby`, `rules:set {kontra, bock, schenken}`, `game:kontra`, `game:re`,
-  `game:gift {yes}`, `game:gift-answer {accept}`.
+  `game:gift {yes}`, `game:gift-answer {accept}`, `chat:send {text}`.
+  Vom Server: `chat:history [msg]`, `chat:message msg`, `chat:removed [seq]`, `chat:cleared`.
+- Der Chat geht nie über `stateFor()` (bis zu 200 Nachrichten bei jedem Zug wären zu viel).
+- Sprachnachrichten: `POST /k/<ID>/voice`, `GET /k/<ID>/voice/<id>`, Token nur im Header `X-Player-Token`, nie in der URL.
 - Eigenschaft und Methode nie gleich benennen (`bid()` vs. `bidValue`).
 - PRs immer gegen `main` (nie gegen einen anderen Feature-Branch stapeln).
 - Neuer Zustand in Room/SkatGame/Bidding → muss in `toJSON`/`fromJSON` (Room listet Felder explizit!).
@@ -129,3 +138,9 @@ Immer nur eine Etappe gleichzeitig; jede einzeln testbar.
 - `touch-action: manipulation` für alle Elemente (kein Doppeltipp-Zoom).
 - Overlays dürfen nie blockieren: Misch-Bühne endet bei Antippen, Fehler, unsichtbarer Seite und spätestens nach 5 s.
 - Vor Änderungen an Oberfläche/Animationen: `npm run test:iphone` (Playwright WebKit, iPhone 12 + SE).
+- iOS meldet Klicks auf Flächen ohne Knopf nicht ans `document` → „daneben tippen“ per `pointerup` erkennen.
+- Hand-Karten: `aria-disabled` statt `disabled` – gesperrte Knöpfe melden je nach Browser gar keine Tipps.
+- `audio.play()` muss direkt im Antippen laufen, nicht erst nach `await fetch` (siehe `unlockAudio` in `chat.js`).
+- Aufnahme: `audio/mp4` allein heißt nicht AAC – Chrome ohne AAC-Encoder nimmt damit Opus in MP4 auf. Den Codec prüfen.
+- Mikro-Knopf ist die einzige Ausnahme von `touch-action: manipulation` (`none`, sonst bricht Scrollen das Halten ab).
+- Playwright-WebKit hat keinen `MediaRecorder` und nicht die iOS-Autoplay-Regeln: Sprachnachrichten am Ende auf echten Geräten prüfen.

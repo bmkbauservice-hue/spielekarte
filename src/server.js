@@ -7,7 +7,7 @@ import { SqliteStore } from './storage/sqlite-store.js';
 const config = loadConfig();
 const store = config.dbPath ? new SqliteStore(config.dbPath) : null;
 console.log(store ? `Speichern in ${config.dbPath}` : 'Hinweis: DB_PATH ist leer – Räume liegen nur im Arbeitsspeicher.');
-const { httpServer, close } = createApp({ basePath: config.basePath, cardIds: config.cardIds, store });
+const { httpServer, close } = createApp({ basePath: config.basePath, cardIds: config.cardIds, store, voiceDir: config.voiceDir });
 
 if (config.cardIds.size === 0) {
   console.warn('Hinweis: CARD_IDS ist leer – ALLE Karten-IDs sind erlaubt. In Produktion CARD_IDS oder CARD_IDS_FILE setzen.');

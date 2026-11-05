@@ -14,6 +14,7 @@
   <script src="{{BASE}}/static/boot.js?v={{V}}"></script>
   <script src="{{BASE}}/socket.io/socket.io.js" defer></script>
   <script src="{{BASE}}/static/fx.js?v={{V}}" defer></script>
+  <script src="{{BASE}}/static/chat.js?v={{V}}" defer></script>
   <script src="{{BASE}}/static/room.js?v={{V}}" defer></script>
 </head>
 <body data-room="{{ROOM_ID}}">
@@ -24,6 +25,12 @@
     </div>
     <div class="room-id">Karte <strong>{{ROOM_ID}}</strong></div>
     <div id="conn" class="conn" data-state="off" title="Verbindung"><i></i><span>verbinde …</span></div>
+    <button id="btn-chat" class="icon-btn" type="button" aria-expanded="false" aria-controls="chat-panel" aria-label="Chat öffnen" hidden>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12a8 8 0 0 1-8 8H7l-4 3v-11a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8z"></path>
+      </svg>
+      <span id="chat-unread" class="chat-unread" hidden></span>
+    </button>
     <button id="btn-sound" class="icon-btn" type="button" aria-pressed="false" aria-label="Ton an oder aus">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M11 5 6 9H3v6h3l5 4z"></path>
@@ -273,6 +280,42 @@
       <button id="btn-reclaim" class="btn btn-gold">Hier weiterspielen</button>
     </section>
   </main>
+
+  <!-- Chat: klappt von unten auf, liegt über der Seite -->
+  <section id="chat-panel" class="chat-panel" aria-label="Chat" hidden>
+    <div class="chat-head">
+      <h2>Tisch-Chat</h2>
+      <button id="btn-chat-close" class="icon-btn" type="button" aria-label="Chat einklappen">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
+      </button>
+    </div>
+    <p id="chat-empty" class="muted chat-empty">Noch keine Nachrichten. Sag was Nettes!</p>
+    <ol id="chat-list" class="chat-list" aria-live="polite"></ol>
+    <div id="chat-quick" class="chat-quick" aria-label="Schnellsprüche">
+      <button type="button" class="chat-chip">Kontra!</button>
+      <button type="button" class="chat-chip">Gut gespielt 👏</button>
+      <button type="button" class="chat-chip">Das war knapp</button>
+      <button type="button" class="chat-chip">Mach hinne!</button>
+      <button type="button" class="chat-chip">Glück gehabt</button>
+      <button type="button" class="chat-chip">Nächste Runde!</button>
+    </div>
+    <p id="chat-hint" class="chat-hint" role="status" hidden></p>
+    <form id="chat-form" class="chat-form" autocomplete="off">
+      <input id="chat-input" name="chat" maxlength="200" enterkeyhint="send" placeholder="Nachricht …" aria-label="Nachricht">
+      <button type="submit" class="btn btn-gold btn-small">Senden</button>
+      <button type="button" id="btn-mic" class="icon-btn chat-mic" aria-label="Gedrückt halten für Sprachnachricht" hidden>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="9" y="3" width="6" height="11" rx="3"></rect>
+          <path d="M5 11a7 7 0 0 0 14 0M12 18v3"></path>
+        </svg>
+      </button>
+      <div id="chat-rec" class="chat-rec" hidden>
+        <i class="chat-rec-dot" aria-hidden="true"></i>
+        <span id="chat-rec-time" class="chat-rec-time">0:00</span>
+        <span id="chat-rec-hint" class="chat-rec-hint"></span>
+      </div>
+    </form>
+  </section>
 
   <p id="toast" class="toast" role="status" aria-live="polite"></p>
 </body>

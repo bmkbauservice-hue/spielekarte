@@ -2,7 +2,7 @@
 
 import { createServer } from 'node:http';
 import { readFileSync, readdirSync } from 'node:fs';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import express from 'express';
@@ -11,9 +11,25 @@ import { RoomRegistry } from './rooms/registry.js';
 import { RoomError, normalizeRoomId } from './rooms/room.js';
 import { GameError } from './game/game.js';
 import { createRateLimiter } from './rate-limit.js';
+import { VoiceStore, isVoiceId, isVoiceType, looksLikeAudio } from './storage/voice-store.js';
 
 const publicDir = fileURLToPath(new URL('./public/', import.meta.url));
 const staticDir = join(publicDir, 'static');
+
+export const VOICE_MAX_BYTES = 600 * 1024;     // eine Sprachnachricht
+export const VOICE_MAX_DURATION_MS = 31_000;   // 30 s + Spielraum für den Timer im Browser
+export const VOICE_MAX_AGE_MS = 24 * 3_600_000; // spätestens dann wird gelöscht
+const VOICE_ROOM_MAX_BYTES = 30 * 1024 * 1024; // Obergrenzen, damit niemand die Platte füllen kann
+const VOICE_TOTAL_MAX_BYTES = 500 * 1024 * 1024;
+
+/** Rate-Limit pro Spieler statt pro Verbindung: Neu verbinden setzt es nicht zurück. Verschwindet mit dem Spieler. */
+function perPlayerLimiter(options) {
+  const limiters = new WeakMap();
+  return (player) => {
+    if (!limiters.has(player)) limiters.set(player, createRateLimiter(options));
+    return limiters.get(player).allow();
+  };
+}
 
 /**
  * @param {object} [options]
@@ -21,6 +37,10 @@ const staticDir = join(publicDir, 'static');
  * @param {Iterable<string>} [options.cardIds] erlaubte Karten-IDs; leer = alle erlaubt
  * @param {{ limit: number, windowMs: number }} [options.joinLimit]  Beitritte pro Verbindung
  * @param {{ limit: number, windowMs: number }} [options.eventLimit] Aktionen pro Verbindung insgesamt
+ * @param {{ limit: number, windowMs: number }} [options.chatLimit]  Chat-Nachrichten pro Spieler
+ * @param {{ limit: number, windowMs: number }} [options.voiceLimit] Sprachnachrichten pro Spieler
+ * @param {string} [options.voiceDir]          Ordner für Sprachnachrichten; leer = Temp-Ordner
+ * @param {number} [options.voiceMaxAgeMs]     Sprachnachrichten werden spätestens danach gelöscht
  * @param {number} [options.sweepIntervalMs]
  * @param {import('./storage/sqlite-store.js').SqliteStore} [options.store]  Speicher; ohne → nur Arbeitsspeicher
  * @param {RoomRegistry} [options.registry]
@@ -30,6 +50,10 @@ export function createApp({
   cardIds = [],
   joinLimit = { limit: 10, windowMs: 60_000 },
   eventLimit = { limit: 120, windowMs: 60_000 },
+  chatLimit = { limit: 5, windowMs: 10_000 },
+  voiceLimit = { limit: 3, windowMs: 30_000 },
+  voiceDir = '',
+  voiceMaxAgeMs = VOICE_MAX_AGE_MS,
   sweepIntervalMs = 60_000,
   store = null,
   registry = new RoomRegistry({ store }),
@@ -41,6 +65,9 @@ export function createApp({
   }
   const allowedCards = new Set(cardIds);
   const isCardAllowed = (id) => allowedCards.size === 0 || allowedCards.has(id);
+  const voices = new VoiceStore(voiceDir);
+  const allowChat = perPlayerLimiter(chatLimit);
+  const allowVoice = perPlayerLimiter(voiceLimit);
 
   const app = express();
   app.disable('x-powered-by');
@@ -74,6 +101,82 @@ export function createApp({
     // id ist geprüft (nur A–Z, 0–9), daher sicher ins HTML einsetzbar
     res.type('html').send(roomHtml.replaceAll('{{ROOM_ID}}', id));
   });
+
+  // ---------- Sprachnachrichten: per HTTP, weil Socket.IO nur kleine Pakete annimmt ----------
+
+  const voiceError = (res, status, code, message) => res.status(status).json({ ok: false, code, message });
+
+  /** Nur Raum-Mitglieder: Das Token kommt im Header, nie in der URL (URLs landen in Protokollen). */
+  function requireMember(req, res, next) {
+    const id = normalizeRoomId(req.params.id);
+    const room = id && isCardAllowed(id) ? registry.get(id) : undefined;
+    const player = room?.players.get(req.get('x-player-token'));
+    if (!player) return voiceError(res, 403, 'NICHT_IM_RAUM', 'Du bist nicht in diesem Raum.');
+    req.room = room;
+    req.player = player;
+    next();
+  }
+
+  /** Alles prüfen, was ohne den Inhalt geht – so wird von Unbefugten gar nicht erst etwas eingelesen. */
+  function checkVoiceUpload(req, res, next) {
+    if (!allowVoice(req.player)) {
+      return voiceError(res, 429, 'ZU_VIELE', 'Zu viele Sprachnachrichten. Bitte kurz warten.');
+    }
+    const mime = (req.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
+    if (!isVoiceType(mime)) return voiceError(res, 415, 'FORMAT_UNGUELTIG', 'Dieses Audioformat wird nicht unterstützt.');
+    const durationMs = Number(req.get('x-voice-duration'));
+    if (!Number.isInteger(durationMs) || durationMs < 0 || durationMs > VOICE_MAX_DURATION_MS) {
+      return voiceError(res, 400, 'DAUER_UNGUELTIG', 'Sprachnachrichten dürfen höchstens 30 Sekunden lang sein.');
+    }
+    req.voice = { id: randomBytes(16).toString('hex'), mime, durationMs };
+    next();
+  }
+
+  router.post(
+    '/k/:id/voice',
+    requireMember,
+    checkVoiceUpload,
+    express.raw({ type: () => true, limit: VOICE_MAX_BYTES }),
+    (req, res) => {
+      const { room, voice } = req;
+      const data = req.body;
+      if (!Buffer.isBuffer(data) || !looksLikeAudio(voice.mime, data)) {
+        return voiceError(res, 400, 'FORMAT_UNGUELTIG', 'Das ist keine gültige Aufnahme.');
+      }
+      if (room.chat.voiceBytes() + data.length > VOICE_ROOM_MAX_BYTES || voices.totalBytes() + data.length > VOICE_TOTAL_MAX_BYTES) {
+        return voiceError(res, 507, 'SPEICHER_VOLL', 'Gerade ist kein Platz für weitere Sprachnachrichten. „Neuer Abend“ räumt auf.');
+      }
+      voice.bytes = data.length;
+      voices.save(room.id, voice, data);
+      const message = room.addVoiceMessage(req.player.token, voice);
+      publish(room);
+      io.to(room.id).emit('chat:message', message);
+      res.status(201).json({ ok: true, id: voice.id });
+    },
+    (err, _req, res, next) => {
+      if (res.headersSent) return next(err);
+      if (err.type === 'entity.too.large') {
+        return voiceError(res, 413, 'ZU_GROSS', 'Die Aufnahme ist zu groß (höchstens 600 KB).');
+      }
+      if (err.type === 'request.aborted') return res.status(400).end(); // Verbindung abgerissen – liest eh niemand mehr
+      console.error('[voice]', err);
+      voiceError(res, 500, 'SERVERFEHLER', 'Unerwarteter Fehler auf dem Server.');
+    },
+  );
+
+  router.get('/k/:id/voice/:voiceId', requireMember, (req, res) => {
+    const message = isVoiceId(req.params.voiceId) ? req.room.chat.findVoice(req.params.voiceId) : null;
+    if (!message) return voiceError(res, 404, 'NICHT_GEFUNDEN', 'Diese Sprachnachricht gibt es nicht mehr.');
+    res.type(message.voice.mime);
+    res.sendFile(
+      voices.relativePath(req.room.id, message.voice),
+      { root: voices.root, etag: false, lastModified: false, cacheControl: false, headers: { 'Cache-Control': 'private, no-store' } },
+      (err) => {
+        if (err && !res.headersSent) voiceError(res, 404, 'NICHT_GEFUNDEN', 'Diese Sprachnachricht gibt es nicht mehr.');
+      },
+    );
+  });
+
   router.use((_req, res) => res.status(404).type('html').send(notFoundHtml));
 
   app.use(basePath || '/', router);
@@ -185,6 +288,7 @@ export function createApp({
       socket.join(room.id);
       room.connect(player.token);
       publish(room);
+      socket.emit('chat:history', room.chat.messages); // erst nach dem Zustand: Der Browser weiß dann, wer "du" ist
       return { token: player.token }; // Token geht NUR an diesen einen Socket
     });
 
@@ -222,11 +326,43 @@ export function createApp({
     action('game:gift-answer', (room, token, { accept }) => room.answerGift(token, accept === true));
     action('vote:request', (room, token, { kind }) => room.requestVote(token, kind));
     action('vote:cast', (room, token, { agree }) => room.castVote(token, agree === true));
-    action('evening:new', (room, token) => room.start(token));
+    action('evening:new', (room, token) => {
+      room.newEvening(token);
+      io.to(room.id).emit('chat:cleared');
+      // Dateifehler dürfen den neuen Abend nicht stoppen; übrig gebliebene Dateien erwischt das Aufräumen
+      try {
+        voices.removeRoom(room.id);
+      } catch (err) {
+        console.error('[voice] Löschen fehlgeschlagen:', err.message);
+      }
+    });
     action('evening:lobby', (room, token) => room.backToLobby(token));
+    action('chat:send', (room, token, { text }) => {
+      if (!allowChat(room.players.get(token))) {
+        throw new RoomError('ZU_VIELE', 'Du schreibst gerade sehr schnell. Bitte kurz warten.');
+      }
+      io.to(room.id).emit('chat:message', room.sendChat(token, text));
+    });
 
     socket.on('disconnect', () => detach(socket));
   });
+
+  /** Abgelaufene Sprachnachrichten entfernen, dann alle Dateien löschen, zu denen es keine Nachricht mehr gibt. */
+  function sweepVoice() {
+    for (const room of registry.rooms.values()) {
+      const removed = room.chat.expireVoice(voiceMaxAgeMs);
+      if (removed.length === 0) continue;
+      registry.persist(room);
+      io.to(room.id).emit('chat:removed', removed);
+    }
+    try {
+      voices.prune((roomId, id) => !!registry.get(roomId)?.chat.findVoice(id));
+    } catch (err) {
+      console.error('[voice] Aufräumen fehlgeschlagen:', err.message); // nächster Versuch beim nächsten Durchlauf
+    }
+  }
+  // Auch beim Start: Die 24 Stunden gelten auch dann, wenn der Server zwischendurch aus war.
+  sweepVoice();
 
   // Abstimmung läuft ab, ohne dass jemand klickt → allen Bescheid geben
   /** @type {Map<string, NodeJS.Timeout>} */
@@ -246,6 +382,7 @@ export function createApp({
   // Regelmäßig aufräumen (getrennte Spieler, leere Räume)
   const sweepTimer = setInterval(() => {
     for (const id of registry.sweep()) broadcast(registry.get(id));
+    sweepVoice();
   }, sweepIntervalMs);
   sweepTimer.unref(); // hält den Prozess nicht künstlich am Leben
 
@@ -255,12 +392,15 @@ export function createApp({
     registry,
     store,
     version,
+    voices,
+    sweepVoice,
     close: () =>
       new Promise((resolve) => {
         clearInterval(sweepTimer);
         for (const timer of voteTimers.values()) clearTimeout(timer);
         io.close(() => {
           store?.close();
+          voices.close();
           resolve();
         });
       }),
@@ -282,7 +422,7 @@ function staticVersion() {
 function securityHeaders(_req, res, next) {
   res.setHeader(
     'Content-Security-Policy',
-    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' ws: wss:; base-uri 'none'; frame-ancestors 'none'",
+    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self' ws: wss:; base-uri 'none'; frame-ancestors 'none'",
   );
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'same-origin');

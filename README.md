@@ -118,14 +118,35 @@ npm test
 - `test/server.test.js` – echter Server unter `/spiel` mit simulierten Handys, inkl. kompletter Runde
 - `test/security.test.js` – Freigabeliste, Beitritts-Limit, Cache-Busting
 - `test/storage.test.js` – Schnappschüsse (300 Runden speichern + weiterspielen), SQLite, Sicherung, echter Neustart
-- `test/browser-compat.test.js` – läuft der Browser-Code auf iOS 13? (Syntax, APIs, CSS, Skript-Reihenfolge)
+- `test/browser-compat.test.js` – läuft der Browser-Code auf iOS 13? (Syntax, APIs, CSS, Skript-Reihenfolge); Wahl des Aufnahmeformats
+- `test/chat.test.js` – Chat-Validierung, Rate-Limits, Raum-Mitglieder, Upload-Größe, Token, Löschen bei „Neuer Abend“ und nach 24 h
 
-iPhone-Test im echten WebKit (komplette Runde, Misch-Show, Zoom, Störfälle):
+iPhone-Test im echten WebKit (komplette Runde, zweimal tippen, Chat, Ungelesen-Zähler, Mikro ohne Erlaubnis, Misch-Show, Zoom, Störfälle):
 
 ```bash
 npx playwright-core install webkit   # einmalig
 npm run test:iphone                  # iPhone 12 + iPhone SE
 ```
+
+Sprachnachrichten zwischen den Browsern (Chrome nimmt echt auf, WebKit spielt echt ab und umgekehrt, dauert ca. 1 Minute):
+
+```bash
+npm run test:voice                   # braucht Chrome/Chromium (sonst CHROME_PATH setzen), ffprobe prüft den Codec
+```
+
+### Sprachnachrichten auf echten Handys prüfen
+
+Die Tests oben laufen auf Linux. Sie beweisen **nicht**, was ein echtes iPhone kann: WebKit dekodiert dort anders als iOS,
+und die Autoplay-Sperre von iOS gibt es dort nicht. Deshalb vor dem Einsatz einmal von Hand, mit einem iPhone und einem
+Android-Handy, **über HTTPS** (ohne HTTPS gibt es kein Mikro, der Knopf bleibt dann aus):
+
+1. iPhone hält den Mikro-Knopf gedrückt: Fragt es erst jetzt nach der Erlaubnis? Kein Kontextmenü, keine Textauswahl?
+2. iPhone nimmt auf → Android tippt die Blase an → Ton kommt.
+3. Android nimmt auf → iPhone tippt die Blase an → Ton kommt **beim ersten Tippen**.
+4. Wegwischen bricht auf beiden ab, Tastatur verdeckt das Eingabefeld nicht.
+5. Beim Android-Handy notieren, was `MediaRecorder.isTypeSupported('audio/mp4;codecs=mp4a.40.2')` meldet.
+   Bei `false` nimmt es WebM/Opus auf – dann auf dem ältesten verfügbaren iPhone Punkt 3 besonders genau prüfen.
+   Kann ein iPhone das nicht abspielen, steht in der Blase „nicht abspielbar“; alles andere läuft weiter.
 
 ## Konfiguration
 
@@ -137,9 +158,11 @@ npm run test:iphone                  # iPhone 12 + iPhone SE
 | `CARD_IDS`  | *(leer)*  | Freigeschaltete Karten, z. B. `MUJU01,TEST01`. **Leer = alle erlaubt** (nur lokal sinnvoll) |
 | `DB_PATH`   | *(leer)*  | SQLite-Datei für die Spielstände. **Leer = nichts speichern** (nur Arbeitsspeicher). Im Docker-Image `/app/data/spielekarte.db` |
 | `CARD_IDS_FILE` | *(leer)* | Datei mit Karten-IDs (eine pro Zeile, `#` = Kommentar), wird mit `CARD_IDS` zusammengeführt |
+| `VOICE_DIR` | *(leer)*  | Ordner für Sprachnachrichten. Leer = Unterordner `voice` neben `DB_PATH`, ohne `DB_PATH` ein Temp-Ordner |
 
 Unbekannte Karten-IDs bekommen eine freundliche Fehlerseite und werden auch beim Socket-Beitritt
-abgelehnt. Schutz gegen Spam: pro Verbindung höchstens 10 Beitritte und 120 Aktionen pro Minute.
+abgelehnt. Schutz gegen Spam: pro Verbindung höchstens 10 Beitritte und 120 Aktionen pro Minute;
+pro Spieler höchstens 5 Chat-Nachrichten in 10 s und 3 Sprachnachrichten in 30 s.
 
 ## Docker
 
@@ -211,6 +234,17 @@ mkdirdesign.com {
   weiter. Nicht gespeichert werden laufende Abstimmungen – die enden mit einem Neustart.
 - **Aufräumen:** Wer in der Lobby länger als 10 Minuten getrennt ist, verliert seinen Platz
   (nach einem Neustart beginnt die Frist neu). Verlassene Räume werden nach 6 Stunden gelöscht.
+- **Chat:** Geht über eigene Socket-Ereignisse an alle im Raum, nicht über den Spielzustand – der müsste sonst bei jedem
+  Zug bis zu 200 Nachrichten mitschleppen. Der Text liegt im Raum-Schnappschuss (also auch in der SQLite-Sicherung),
+  bis „Neuer Abend“ ihn leert oder der Raum gelöscht wird. Angezeigt wird er nur per `textContent`.
+- **Sprachnachrichten:** Hochladen per HTTP, weil Socket.IO hier nur 10 KB annimmt. Das Spieler-Token steht im Header,
+  nie in der URL. Die Dateien liegen im Ordner `VOICE_DIR`, nicht in SQLite – so landen sie in keiner Sicherung.
+  Gelöscht wird bei „Neuer Abend“, spätestens nach 24 h (auch wenn der Server zwischendurch aus war) und wenn der Raum
+  verschwindet. Grenzen: 600 KB pro Aufnahme, 30 MB pro Raum, 500 MB insgesamt.
+- **Aufnahmeformat:** Bevorzugt AAC in MP4, sonst WebM/Opus. Schlichtes `audio/mp4` kommt bewusst zuletzt:
+  Chrome ohne AAC-Encoder nimmt damit Opus in MP4 auf.
+- **Abspielen auf iOS:** Nur per Antippen. Das Antippen startet sofort kurze Stille, damit das `<audio>`-Element
+  freigeschaltet ist, wenn der Download fertig ist. Klappt das nicht, reicht ein zweites Tippen.
 
 ## Etappen
 
@@ -220,3 +254,4 @@ mkdirdesign.com {
 4. ✅ 3b Hausregeln: Kontra/Re, Bockrunden, Schenken
 5. ✅ 3c Spielstand speichern (SQLite im Docker-Volume)
 6. ✅ 4 Design + Animationen
+7. ✅ 5 Zweimal tippen, Text-Chat, Sprachnachrichten
