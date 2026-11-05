@@ -14,7 +14,8 @@
     "test": "node --test",
     "backup": "node scripts/backup.js",
     "assets": "node scripts/copy-assets.js",
-    "test:iphone": "node e2e/iphone-webkit.mjs \"iPhone 12\" && node e2e/iphone-webkit.mjs \"iPhone SE\""
+    "test:iphone": "node e2e/iphone-webkit.mjs \"iPhone 12\" && node e2e/iphone-webkit.mjs \"iPhone SE\"",
+    "test:voice": "node e2e/voice-interop.mjs"
   },
   "dependencies": {
     "express": "^5.3.0",

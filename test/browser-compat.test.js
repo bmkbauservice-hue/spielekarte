@@ -7,6 +7,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
+import { runInNewContext } from 'node:vm';
 import { parse, tokenizer } from 'acorn';
 
 const require = createRequire(import.meta.url);
@@ -74,6 +75,40 @@ describe('Browser-Skripte laufen auf iOS 13', () => {
       assert.equal(calledNames(read(join(staticDir, file))).includes('animate'), false, `${file} ruft .animate() direkt auf`);
     }
     assert.match(read(join(staticDir, 'fx.js')), /typeof Element\.prototype\.animate === 'function'/);
+  });
+});
+
+describe('Aufnahmeformat wählen (chat.js)', () => {
+  /** chat.js in einer Attrappe laden: Dieser Browser "kann" genau die angegebenen Typen aufnehmen. */
+  function pickFor(supported, { recorder = true, mediaDevices = true } = {}) {
+    const sandbox = { window: {}, navigator: mediaDevices ? { mediaDevices: { getUserMedia() {} } } : {} };
+    if (recorder) sandbox.MediaRecorder = { isTypeSupported: (type) => supported.includes(type) };
+    runInNewContext(read(join(staticDir, 'chat.js')), sandbox);
+    return sandbox.window.SkatChat.pickRecordType();
+  }
+  const AAC = 'audio/mp4;codecs=mp4a.40.2';
+  const OPUS = 'audio/webm;codecs=opus';
+
+  test('iPhone: AAC', () => {
+    assert.equal(pickFor([AAC, 'audio/mp4']), AAC);
+  });
+
+  test('kann beides (neues iPhone, Android mit AAC-Encoder): trotzdem AAC', () => {
+    assert.equal(pickFor([AAC, 'audio/mp4', OPUS, 'audio/webm']), AAC);
+  });
+
+  test('Chrome ohne AAC-Encoder: WebM/Opus – NICHT schlichtes audio/mp4, das wäre Opus in MP4', () => {
+    assert.equal(pickFor(['audio/mp4', OPUS, 'audio/webm']), OPUS);
+  });
+
+  test('alter Safari, der den Codec-Zusatz nicht kennt: schlichtes audio/mp4 (ist dort AAC)', () => {
+    assert.equal(pickFor(['audio/mp4']), 'audio/mp4');
+  });
+
+  test('nichts Passendes, kein MediaRecorder oder kein Mikro-Zugriff → kein Format (Knopf bleibt aus)', () => {
+    assert.equal(pickFor(['audio/ogg']), null);
+    assert.equal(pickFor([AAC], { recorder: false }), null);
+    assert.equal(pickFor([AAC], { mediaDevices: false }), null);
   });
 });
 

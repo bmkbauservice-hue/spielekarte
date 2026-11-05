@@ -22,7 +22,10 @@
 
   const $ = (id) => document.getElementById(id);
   const VIEWS = ['view-connecting', 'view-name', 'view-room', 'view-replaced'];
-  const show = (view) => VIEWS.forEach((v) => { $(v).hidden = v !== view; });
+  const show = (view) => {
+    VIEWS.forEach((v) => { $(v).hidden = v !== view; });
+    chat.setVisible(view === 'view-room');
+  };
 
   let state = null;
   let lastStatus = null;
@@ -39,9 +42,25 @@
         resolve(err ? { ok: false, code: 'TIMEOUT', message: 'Keine Antwort vom Server.' } : res));
     });
 
+  // Fehlt chat.js (z. B. Ladefehler), läuft das Spiel trotzdem – nur ohne Chat
+  let myToken = null; // zusätzlich zum localStorage: der kann im privaten Modus blockiert sein
+  const chat = window.SkatChat
+    ? window.SkatChat.init({
+      base: BASE,
+      roomId: ROOM_ID,
+      socket,
+      request,
+      getToken: () => myToken || store.get(TOKEN_KEY),
+      store,
+      readKey: `spielekarte:chat-gelesen:${ROOM_ID}${suffix}`,
+      toast,
+    })
+    : { setVisible() {}, setMe() {}, reset() {} };
+
   async function join(name) {
     const res = await request('room:join', { roomId: ROOM_ID, name, token: store.get(TOKEN_KEY) });
     if (res.ok) {
+      myToken = res.token;
       store.set(TOKEN_KEY, res.token);
       if (name) store.set(NAME_KEY, name);
     } else if (res.code === 'TOKEN_UNBEKANNT') {
@@ -107,6 +126,7 @@
     if (!state || replaced) return;
     if (!state.you) return showNameForm();
     show('view-room');
+    chat.setMe(state.you.id);
 
     const { you, seats, spectators, status } = state;
     const lobby = status === 'lobby';
@@ -520,6 +540,24 @@
   // ----- Hand: überlappend, nur neu zeichnen bei Änderung -----
 
   let handKey = null;
+  let armedCard = null; // zweimal tippen: die zum Ausspielen angehobene Karte (nur im Browser)
+
+  /** Angehobene Karte + Hinweis anzeigen – nur Klassen setzen, ohne die Hand neu zu zeichnen (sonst keine Animation). */
+  function showArmed(myTurn, discarding) {
+    for (const el of $('hand').querySelectorAll('.card[data-card]')) {
+      el.classList.toggle('armed', el.dataset.card === armedCard);
+    }
+    let text = '';
+    if (discarding) text = `${discardPick.size} von 2 zum Drücken gewählt`;
+    else if (armedCard) text = 'Nochmal tippen zum Ausspielen';
+    else if (myTurn) text = 'Antippen = auswählen, nochmal = ausspielen';
+    $('hand-hint').textContent = text;
+  }
+
+  function setArmed(card) {
+    armedCard = card;
+    if (state && state.game) showArmed(state.game.phase === 'playing' && state.game.turn === state.you.seat, false);
+  }
 
   function renderHand(game, myTurn, meDeclarer) {
     const hand = $('hand');
@@ -527,13 +565,14 @@
     const cards = or(game.hand, []);
     hand.hidden = !game.hand || cards.length === 0; // nach dem letzten Stich keine leere Lücke
     const legal = new Set(game.legal);
+    if (!myTurn || !legal.has(armedCard)) armedCard = null; // Zug vorbei oder Karte nicht mehr spielbar
     const width = hand.clientWidth || 358;
     const cardW = Math.min(76, Math.max(54, Math.round(width / 5.4)));
     const step = cards.length > 1 ? Math.min(cardW * 0.9, (width - cardW) / (cards.length - 1)) : 0;
     const offset = Math.max(0, (width - (cardW + step * (cards.length - 1))) / 2);
 
     const key = [width, myTurn, discarding, cards.join(','), [...legal].join(','), [...discardPick].join(',')].join('|');
-    if (key === handKey) return;
+    if (key === handKey) return showArmed(myTurn, discarding);
     const firstDeal = handKey !== null && handKey.split('|')[3] === '' && cards.length > 0;
     handKey = key;
 
@@ -543,7 +582,8 @@
       const playable = discarding || (myTurn && legal.has(card));
       el.type = 'button';
       el.dataset.card = card;
-      el.disabled = !playable;
+      // aria-disabled statt disabled: Gesperrte Knöpfe melden je nach Browser gar keine Tipps – "daneben tippen" zählt aber auch dort
+      el.setAttribute('aria-disabled', String(!playable));
       el.style.left = `${offset + i * step}px`;
       el.style.zIndex = String(i + 1);
       el.classList.toggle('playable', playable && !discarding);
@@ -553,10 +593,7 @@
       return el;
     }));
     if (firstDeal) [...hand.children].forEach((el) => FX.fadeIn(el, 220));
-
-    $('hand-hint').textContent = discarding
-      ? `${discardPick.size} von 2 zum Drücken gewählt`
-      : myTurn ? 'Spielbare Karten sind hervorgehoben – antippen zum Ausspielen' : '';
+    showArmed(myTurn, discarding);
   }
 
   /**
@@ -990,12 +1027,12 @@
     if (res.ok) for (const id of ['opt-schneider', 'opt-schwarz', 'opt-ouvert']) $(id).checked = false;
   });
 
-  // Hand: beim Drücken Karten auswählen, sonst spielen.
-  // Doppeltippen verhindern: bis zur Antwort des Servers keine zweite Karte schicken.
+  // Hand: beim Drücken Karten auswählen. Sonst zweimal tippen: 1. Tippen hebt an, 2. Tippen derselben Karte spielt.
+  // Bis zur Antwort des Servers keine zweite Karte schicken.
   let playing = false;
   $('hand').addEventListener('click', async (event) => {
     const btn = event.target.closest('button[data-card]');
-    if (!btn || btn.disabled || playing) return;
+    if (!btn || btn.getAttribute('aria-disabled') === 'true' || playing) return;
     const card = btn.dataset.card;
     if (state.game.phase === 'discard') {
       if (discardPick.has(card)) discardPick.delete(card);
@@ -1003,9 +1040,22 @@
       render();
       return;
     }
+    if (armedCard !== card) {
+      setArmed(card);
+      return;
+    }
     playing = true;
     await act('game:play', { card });
     playing = false;
+    if (armedCard === card) setArmed(null); // z. B. vom Server abgelehnt: wieder bei null anfangen
+  });
+
+  // Daneben tippen hebt die Auswahl auf. pointerup statt click: iOS meldet Klicks auf Flächen ohne Knopf nicht ans
+  // document. Und wer scrollt, bekommt pointercancel statt pointerup – Scrollen hebt die Auswahl also nicht auf.
+  document.addEventListener('pointerup', (event) => {
+    if (!armedCard) return;
+    const onCard = event.target.closest && event.target.closest('#hand button[data-card]');
+    if (!onCard || onCard.getAttribute('aria-disabled') === 'true') setArmed(null);
   });
 
   $('btn-next').addEventListener('click', () => act('game:next'));
@@ -1028,6 +1078,8 @@
     const res = await act('room:leave');
     if (res.ok) {
       store.remove(TOKEN_KEY);
+      myToken = null;
+      chat.reset();
       state = null;
       showNameForm();
     }

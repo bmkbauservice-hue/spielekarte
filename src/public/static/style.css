@@ -74,7 +74,7 @@ button, input { font: inherit; }
 .brand { display: flex; align-items: center; gap: 4px; text-decoration: none; }
 .brand img { width: 64px; height: 32px; object-fit: contain; display: block; }
 .brand span { font-family: var(--font-script); font-size: 20px; line-height: 1; color: var(--logo-red); }
-.room-id { margin-left: auto; font-size: 13px; color: var(--muted); }
+.room-id { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--muted); }
 .room-id strong { color: var(--gold); letter-spacing: 0.06em; }
 .conn { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
 .conn i { width: 9px; height: 9px; border-radius: 50%; background: var(--danger); }
@@ -356,9 +356,11 @@ input:focus-visible, button:focus-visible { outline: 2px solid var(--mint); outl
 
 /* ---------- Hand: überlappend ---------- */
 .hand-wrap { position: relative; }
-.hand { position: relative; height: 122px; }
-.hand .card { position: absolute; top: 22px; --card-w: var(--hand-w, 66px); cursor: default; transition: top 0.18s ease, opacity 0.18s ease; }
-.hand .card.playable { top: 0; cursor: pointer; border: 2px solid var(--mint); box-shadow: 0 0 16px rgba(62, 242, 192, 0.55), 0 8px 16px rgba(0, 0, 0, 0.45); }
+.hand { position: relative; height: 140px; }
+.hand .card { position: absolute; top: 30px; --card-w: var(--hand-w, 66px); cursor: default; transition: transform 0.14s ease, opacity 0.18s ease; }
+.hand .card.playable { top: 16px; cursor: pointer; border: 1.5px solid rgba(62, 242, 192, 0.7); box-shadow: 0 0 8px rgba(62, 242, 192, 0.3), 0 8px 16px rgba(0, 0, 0, 0.45); }
+/* 1. Tippen: Karte hebt sich an und leuchtet. Die Reihenfolge der Karten bleibt, damit jede weiter antippbar ist. */
+.hand .card.armed { transform: translateY(-16px); border: 3px solid var(--mint); box-shadow: 0 0 20px var(--mint-glow), 0 0 6px var(--mint), 0 10px 18px rgba(0, 0, 0, 0.5); }
 .hand .card.blocked { opacity: 0.55; }
 .hand .card.pickable { cursor: pointer; }
 .hand .card.selected { top: 0; border: 2px solid var(--gold); box-shadow: 0 0 16px rgba(232, 199, 102, 0.6), 0 8px 16px rgba(0, 0, 0, 0.45); }
@@ -485,6 +487,117 @@ table.scores { width: 100%; border-collapse: collapse; font-size: 14px; font-var
 .fx-sparkle { position: absolute; top: 0; right: 0; bottom: 0; left: 0; pointer-events: none; overflow: visible; }
 .fx-spark { position: absolute; left: 50%; top: 40%; width: 8px; height: 8px; margin: -4px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 10px var(--gold); opacity: 0; }
 .fx-spark.mint { background: var(--mint); box-shadow: 0 0 10px var(--mint); }
+
+/* ---------- Chat ---------- */
+#btn-chat { position: relative; }
+#btn-chat.has-unread { border-color: var(--mint); color: var(--mint); box-shadow: 0 0 12px var(--mint-glow); }
+.chat-unread {
+  position: absolute; top: -5px; right: -5px;
+  min-width: 20px; height: 20px; padding: 0 5px;
+  display: grid; place-items: center;
+  border-radius: 999px;
+  background: var(--mint); color: #053324;
+  font-size: 12px; font-weight: 800; line-height: 1;
+}
+.chat-panel {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+  max-width: 560px; margin: 0 auto;
+  height: 66vh;
+  height: 66dvh;
+  display: flex; flex-direction: column;
+  padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: var(--surface);
+  border: 1px solid var(--line); border-bottom: none;
+  box-shadow: 0 -12px 30px rgba(0, 0, 0, 0.5);
+  animation: chat-fade 0.16s ease;
+}
+@keyframes chat-fade { from { opacity: 0; } to { opacity: 1; } }
+.chat-head { display: flex; align-items: center; justify-content: space-between; flex: none; padding-bottom: 8px; }
+.chat-head h2 { margin: 0; }
+.chat-empty { margin: 16px 0 auto; text-align: center; font-size: 14px; }
+.chat-list {
+  flex: 1; min-height: 0;
+  list-style: none; margin: 0; padding: 4px 0;
+  display: flex; flex-direction: column; gap: 8px;
+  overflow-x: hidden; overflow-y: auto; -webkit-overflow-scrolling: touch;
+}
+.chat-list:empty { display: none; }
+.chat-msg {
+  flex: none;
+  align-self: flex-start;
+  max-width: 85%; min-width: 0;
+  padding: 7px 11px;
+  border-radius: 12px 12px 12px 4px;
+  background: var(--surface-2);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.chat-msg.mine { align-self: flex-end; border-radius: 12px 12px 4px 12px; background: rgba(62, 242, 192, 0.1); border-color: rgba(62, 242, 192, 0.4); }
+.chat-meta { display: flex; align-items: baseline; gap: 8px; margin: 0 0 2px; font-size: 12px; color: var(--faint); }
+.chat-meta b { color: var(--gold); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-meta time { flex: none; font-variant-numeric: tabular-nums; }
+.chat-text { margin: 0; font-size: 15px; line-height: 1.35; overflow-wrap: break-word; word-break: break-word; }
+
+.chat-quick {
+  flex: none;
+  display: flex; gap: 8px;
+  padding: 8px 0;
+  overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none;
+}
+.chat-quick::-webkit-scrollbar { display: none; }
+.chat-chip {
+  flex: none;
+  min-height: 38px; padding: 0 12px;
+  border-radius: 999px;
+  background: transparent; border: 1px solid rgba(232, 199, 102, 0.5); color: var(--gold);
+  font-size: 15px; font-weight: 600; white-space: nowrap;
+  cursor: pointer;
+}
+.chat-chip:active { background: rgba(232, 199, 102, 0.15); }
+.chat-hint { flex: none; margin: 0 0 8px; font-size: 13px; line-height: 1.35; color: var(--gold-soft); }
+
+.chat-form { position: relative; flex: none; display: flex; align-items: center; gap: 8px; margin: 0; }
+.chat-form input { flex: 1; min-width: 0; padding: 10px 12px; }
+.chat-form .btn { flex: none; }
+/* Der Finger bleibt beim Aufnehmen auf dem Knopf: kein Scrollen, kein Kontextmenü, keine Textauswahl */
+.chat-mic { touch-action: none; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; transition: transform 0.12s ease; }
+.chat-mic svg { pointer-events: none; }
+.chat-mic.recording { transform: scale(1.12); background: var(--felt-red); border-color: var(--danger); color: var(--text-strong); }
+/* Liegt beim Aufnehmen über Eingabefeld und Senden – der Mikro-Knopf bleibt frei und an seinem Platz */
+.chat-rec {
+  position: absolute; top: 0; bottom: 0; left: 0; right: 50px;
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 10px;
+  border-radius: 12px;
+  background: var(--surface-2); border: 1px solid var(--danger);
+  pointer-events: none;
+}
+.chat-rec-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--danger); animation: rec-pulse 1s ease-in-out infinite; }
+@keyframes rec-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+.chat-rec-time { flex: none; font-weight: 800; font-variant-numeric: tabular-nums; }
+.chat-rec-hint { min-width: 0; font-size: 12px; line-height: 1.2; color: var(--muted); }
+
+/* Sprachblase */
+.voice { display: flex; align-items: center; gap: 10px; width: 210px; max-width: 100%; }
+.voice-play {
+  flex: none;
+  width: var(--touch); height: var(--touch);
+  display: grid; place-items: center;
+  border-radius: 50%;
+  background: var(--gold); border: none; color: var(--bg);
+  font-size: 16px; font-weight: 800; line-height: 1;
+  cursor: pointer;
+}
+.voice-play.playing { background: var(--mint); color: #053324; }
+.voice-play:disabled { background: #2B4A3E; color: var(--faint); cursor: default; }
+.voice-track { flex: 1; min-width: 0; height: 4px; border-radius: 2px; background: rgba(243, 235, 214, 0.2); overflow: hidden; }
+.voice-bar { display: block; width: 100%; height: 100%; background: var(--mint); transform: scaleX(0); transform-origin: left; }
+.voice-time { flex: none; max-width: 76px; font-size: 12px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* Kleine Handys: Karten-Code weg, damit Chat- und Ton-Knopf neben das Logo passen */
+@media (max-width: 359px) {
+  .room-id { visibility: hidden; flex: 1; }
+}
 
 /* ---------- Toast ---------- */
 .toast {

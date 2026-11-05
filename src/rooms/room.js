@@ -5,6 +5,7 @@ import { randomBytes } from 'node:crypto';
 import { SkatGame } from '../game/game.js';
 import { simpleTotals, seegerFabianTotals, summarizeEvening } from '../game/stats.js';
 import { DEFAULT_HOUSE_RULES, normalizeHouseRules, nextBockCount, triggersBock } from '../game/house-rules.js';
+import { CHAT_MAX_LENGTH, ChatLog, chatLength, cleanChatText } from './chat.js';
 
 export const SEAT_COUNT = 3;
 export const MAX_SPECTATORS = 20;
@@ -88,6 +89,8 @@ export class Room {
     this.players = new Map();
     /** @type {(string|null)[]} Token pro Spielplatz */
     this.seats = Array(SEAT_COUNT).fill(null);
+    /** Chat-Verlauf – geht über eigene Ereignisse an die Clients, nicht über stateFor() */
+    this.chat = new ChatLog({ now });
     this.lastActivity = now();
   }
 
@@ -207,6 +210,33 @@ export class Room {
     this.summary = null;
     this.eveningStartedAt = this.now();
     this.touch();
+  }
+
+  /** Knopf "Neuer Abend": startet wie start() und leert zusätzlich den Chat – aber nur, wenn der Start geklappt hat. */
+  newEvening(token) {
+    this.start(token);
+    this.chat.clear();
+  }
+
+  // ---------- Chat ----------
+
+  /** Textnachricht von einem Raum-Mitglied (Spieler oder Zuschauer). */
+  sendChat(token, raw) {
+    const p = this.require(token);
+    const text = cleanChatText(raw);
+    if (!text) throw new RoomError('CHAT_LEER', 'Die Nachricht ist leer.');
+    if (chatLength(text) > CHAT_MAX_LENGTH) {
+      throw new RoomError('CHAT_ZU_LANG', `Höchstens ${CHAT_MAX_LENGTH} Zeichen pro Nachricht.`);
+    }
+    this.touch();
+    return this.chat.add({ from: p.id, name: p.name, kind: 'text', text });
+  }
+
+  /** Sprachnachricht eintragen (die Datei ist da schon gespeichert). */
+  addVoiceMessage(token, voice) {
+    const p = this.require(token);
+    this.touch();
+    return this.chat.add({ from: p.id, name: p.name, kind: 'voice', voice });
   }
 
   // ---------- Spielzüge (werden an SkatGame weitergereicht) ----------
@@ -445,6 +475,7 @@ export class Room {
       summary: structuredClone(this.summary),
       game: this.game ? this.game.toJSON() : null,
       gameRecorded: this.game !== null && this.recordedGame === this.game,
+      chat: this.chat.toJSON(),
       lastActivity: this.lastActivity,
     };
   }
@@ -472,6 +503,8 @@ export class Room {
     room.summary = structuredClone(data.summary);
     room.game = data.game ? SkatGame.fromJSON(data.game) : null;
     room.recordedGame = data.gameRecorded ? room.game : null;
+    // Ältere Schnappschüsse haben noch keinen Chat → leer starten. Deshalb bleibt SNAPSHOT_VERSION gleich.
+    room.chat = ChatLog.fromJSON(data.chat, { now: room.now });
     room.lastActivity = data.lastActivity;
     return room;
   }
